@@ -294,7 +294,7 @@
     "typecheck": "tsc --noEmit -p .",
     "compile": "tsc -p .",
     "watch": "npm run build -- --watch",
-    "test": "node --test out/test/",
+    "test": "node --test \"out/test/*.test.js\"",
     "test:integration": "npm run build && node test/integration/run.js",
     "vscode:prepublish": "npm run build",
     "package": "vsce package --allow-missing-repository"
