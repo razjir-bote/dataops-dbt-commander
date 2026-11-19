@@ -26,6 +26,16 @@ Supports dbt-core 1.x (tested with 1.12); not dbt 2 / Fusion.
 - **Autocomplete** — model names inside `ref('`, source names inside `source('`, and that source's tables in its
   second argument.
 
+- **Go to definition for macros** — Ctrl+click a macro call inside `{{ }}` / `{% %}` (`{{ cents_to_dollars('x') }}`,
+  `{{ dbt_utils.star(...) }}`, `{{ dbt.current_timestamp() }}`) to open it — your project's macros, installed
+  packages, and dbt's own / adapter macros inside your venv.
+- **dbt Generate YAML** — right-click a model (or use the sidebar) to write its `models:` entry with every column
+  and its data type, read from the warehouse through dbt (the model must be built; you're offered *Build & retry*).
+  It adds only missing columns to an existing entry, otherwise appends to a `.yml` in the model's folder, otherwise
+  creates `<model>.yml`. Existing lines are left untouched and the change is left unsaved for you to review.
+- **dbt sidebar** — the dbt icon in the Activity Bar shows Models (by folder), Sources, Seeds, Snapshots and Tests
+  (by model), with run / build / test / seed / snapshot buttons, and Compile / Preview / Generate YAML on right-click.
+
 Go to definition and autocomplete read `target/manifest.json`, which dbt rewrites on every run, build, compile or
 parse — so they reflect your last dbt command. Without a manifest, `ref()` still jumps to a model file of that name.
 

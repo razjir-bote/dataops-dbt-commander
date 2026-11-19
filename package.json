@@ -2,7 +2,7 @@
   "name": "dbt-runner",
   "displayName": "dbt Runner",
   "description": "Run, build, test, compile and preview dbt models from the VS Code Explorer and editor with dbt-core 1.x from a configured venv.",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "publisher": "local",
   "license": "MIT",
   "engines": {
@@ -98,6 +98,59 @@
         "title": "dbt Seed",
         "category": "dbt Runner",
         "icon": "$(table)"
+      },
+      {
+        "command": "dbtRunner.generateYaml",
+        "title": "dbt Generate YAML",
+        "category": "dbt Runner"
+      },
+      {
+        "command": "dbtRunner.parse",
+        "title": "dbt parse",
+        "category": "dbt Runner",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "dbtRunner.refreshSidebar",
+        "title": "Refresh",
+        "category": "dbt Runner",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "dbtRunner.tree.run",
+        "title": "Run",
+        "category": "dbt Runner",
+        "icon": "$(play)"
+      },
+      {
+        "command": "dbtRunner.tree.build",
+        "title": "Build",
+        "category": "dbt Runner",
+        "icon": "$(run-all)"
+      },
+      {
+        "command": "dbtRunner.tree.test",
+        "title": "Test",
+        "category": "dbt Runner",
+        "icon": "$(beaker)"
+      },
+      {
+        "command": "dbtRunner.tree.seed",
+        "title": "Seed",
+        "category": "dbt Runner",
+        "icon": "$(play)"
+      },
+      {
+        "command": "dbtRunner.tree.snapshot",
+        "title": "Snapshot",
+        "category": "dbt Runner",
+        "icon": "$(play)"
+      },
+      {
+        "command": "dbtRunner.tree.runTest",
+        "title": "Run test",
+        "category": "dbt Runner",
+        "icon": "$(play)"
       }
     ],
     "submenus": [
@@ -178,6 +231,11 @@
         {
           "command": "dbtRunner.openSettings",
           "group": "z@1"
+        },
+        {
+          "command": "dbtRunner.generateYaml",
+          "group": "inspect@3",
+          "when": "!explorerResourceIsFolder"
         }
       ],
       "commandPalette": [
@@ -220,6 +278,93 @@
         {
           "command": "dbtRunner.seedFiles",
           "when": "editorIsOpen && resourceExtname =~ /^\\.csv$/i && resourcePath =~ /[\\\\/]seeds[\\\\/]/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
+        },
+        {
+          "command": "dbtRunner.generateYaml",
+          "when": "editorIsOpen && resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models([\\\\/]|$)/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
+        },
+        {
+          "command": "dbtRunner.tree.run",
+          "when": "false"
+        },
+        {
+          "command": "dbtRunner.tree.build",
+          "when": "false"
+        },
+        {
+          "command": "dbtRunner.tree.test",
+          "when": "false"
+        },
+        {
+          "command": "dbtRunner.tree.seed",
+          "when": "false"
+        },
+        {
+          "command": "dbtRunner.tree.snapshot",
+          "when": "false"
+        },
+        {
+          "command": "dbtRunner.tree.runTest",
+          "when": "false"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "dbtRunner.refreshSidebar",
+          "when": "view == dbtRunner.project",
+          "group": "navigation@1"
+        },
+        {
+          "command": "dbtRunner.parse",
+          "when": "view == dbtRunner.project",
+          "group": "navigation@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "dbtRunner.tree.run",
+          "when": "view == dbtRunner.project && viewItem =~ /^(model|modelFolder)$/",
+          "group": "inline@1"
+        },
+        {
+          "command": "dbtRunner.tree.build",
+          "when": "view == dbtRunner.project && viewItem =~ /^(model|modelFolder)$/",
+          "group": "inline@2"
+        },
+        {
+          "command": "dbtRunner.tree.test",
+          "when": "view == dbtRunner.project && viewItem =~ /^(model|modelFolder)$/",
+          "group": "inline@3"
+        },
+        {
+          "command": "dbtRunner.tree.seed",
+          "when": "view == dbtRunner.project && viewItem == seed",
+          "group": "inline@1"
+        },
+        {
+          "command": "dbtRunner.tree.snapshot",
+          "when": "view == dbtRunner.project && viewItem == snapshot",
+          "group": "inline@1"
+        },
+        {
+          "command": "dbtRunner.tree.runTest",
+          "when": "view == dbtRunner.project && viewItem == test",
+          "group": "inline@1"
+        },
+        {
+          "command": "dbtRunner.compile",
+          "when": "view == dbtRunner.project && viewItem == model",
+          "group": "model@1"
+        },
+        {
+          "command": "dbtRunner.preview",
+          "when": "view == dbtRunner.project && viewItem == model",
+          "group": "model@2"
+        },
+        {
+          "command": "dbtRunner.generateYaml",
+          "when": "view == dbtRunner.project && viewItem == model",
+          "group": "model@3"
         }
       ]
     },
@@ -307,7 +452,25 @@
         "mac": "cmd+' p",
         "when": "resourceScheme == file && editorTextFocus && resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models([\\\\/]|$)/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
       }
-    ]
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "dbtRunner",
+          "title": "dbt",
+          "icon": "resources/dbt.svg"
+        }
+      ]
+    },
+    "views": {
+      "dbtRunner": [
+        {
+          "id": "dbtRunner.project",
+          "name": "Project",
+          "contextualTitle": "dbt"
+        }
+      ]
+    }
   },
   "scripts": {
     "build": "esbuild src/extension.ts --bundle --platform=node --target=node18 --format=cjs --external:vscode --outfile=dist/extension.js --sourcemap",

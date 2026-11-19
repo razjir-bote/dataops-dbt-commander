@@ -47,7 +47,7 @@ test('parseManifest returns models with absolute paths, packages under dbt_packa
     ['orders', 'demo', path.join(root, 'models', 'orders_v2.sql')],
     ['helper', 'utils', path.join(root, 'dbt_packages', 'utils', 'models', 'helper.sql')]
   ]);
-  assert.deepEqual(m.sources, [{ source: 'raw', table: 'orders', file: path.join(root, 'models', 'src', 'sources.yml') }]);
+  assert.deepEqual(m.sources, [{ source: 'raw', table: 'orders', package: 'demo', file: path.join(root, 'models', 'src', 'sources.yml') }]);
 });
 
 test('parseManifest tolerates bad input', () => {

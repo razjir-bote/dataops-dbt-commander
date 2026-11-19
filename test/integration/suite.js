@@ -23,7 +23,7 @@ exports.run = async () => {
   const run = (cmd, ...p) => vscode.commands.executeCommand(`dbtRunner.${cmd}`, uri(...p), [uri(...p)]);
   const same = (a, b) => path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
 
-  await vscode.extensions.getExtension('local.dbt-runner').activate();
+  const api = await vscode.extensions.getExtension('local.dbt-runner').activate();
   const cfg = () => vscode.workspace.getConfiguration('dbtRunner');
 
   await step('venv setting read from workspace', async () => assert.ok(fs.existsSync(cfg().get('venvPath'))));
@@ -209,6 +209,9 @@ exports.run = async () => {
   });
 
   await step('CodeLens: Run · Build · Test · Compile · Preview above a model', async () => {
+    // Open the model first: right after closeAllEditors, VS Code's codelens command intermittently threw
+    // "Illegal argument" while the document was being disposed.
+    await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri('models', 'b.sql')));
     const lenses = await vscode.commands.executeCommand('vscode.executeCodeLensProvider', uri('models', 'b.sql'));
     const cmds = lenses.map(l => l.command && l.command.command);
     assert.deepEqual(cmds, ['dbtRunner.run', 'dbtRunner.build', 'dbtRunner.test', 'dbtRunner.compile', 'dbtRunner.preview']);
@@ -216,10 +219,104 @@ exports.run = async () => {
     assert.equal(none.length, 0, 'lenses shown outside models/');
   });
 
+  // ----- v0.4: macros, YAML generation, sidebar -----
+
+  await step('go to definition: project macro', async () => {
+    const d = await definition(['analyses', 'uses_macro.sql'], 'cents_to_dollars');
+    assert.ok(d && same(d.file, file('macros', 'money.sql')), JSON.stringify(d));
+    assert.equal(d.line, 2);
+  });
+
+  await step("go to definition: dbt's own macro inside the venv", async () => {
+    const d = await definition(['analyses', 'uses_macro.sql'], 'current_timestamp');
+    assert.ok(d, 'no definition');
+    assert.match(d.file.replace(/\\/g, '/'), /dbt\/include\/global_project\//);
+    const line = fs.readFileSync(d.file, 'utf8').split(/\r?\n/)[d.line];
+    assert.match(line, /macro\s+current_timestamp\s*\(/);
+  });
+
+  const docText = async f => (await vscode.workspace.openTextDocument(vscode.Uri.file(f))).getText();
+
+  await step('generate YAML: appends a model to the folder yml', async () => {
+    const before = fs.readFileSync(file('models', 'schema.yml'), 'utf8');
+    await vscode.commands.executeCommand('dbtRunner.generateYaml', uri('models', 'c.sql'));
+    const text = await docText(file('models', 'schema.yml'));
+    assert.ok(text.startsWith(before.replace(/\s+$/, '')), 'existing lines of schema.yml changed');
+    assert.match(text, /- name: b[\s\S]*- name: c\s/);
+    assert.match(text, /- name: c\s+description: ""\s+columns:\s+- name: id\s+data_type: \S+/);
+    await vscode.workspace.saveAll(false);
+  });
+
+  await step('generate YAML: creates <model>.yml when the folder has none', async () => {
+    await vscode.commands.executeCommand('dbtRunner.generateYaml', uri('models', 'staging', 'stg_a.sql'));
+    const f = file('models', 'staging', 'stg_a.yml');
+    // VS Code applies the editor's line endings (CRLF by default on Windows) to inserted text.
+    assert.match(await docText(f), /^version: 2\r?\n\r?\nmodels:\r?\n  - name: stg_a\r?\n/);
+    await vscode.workspace.saveAll(false);
+    assert.ok(fs.existsSync(f));
+  });
+
+  await step('generate YAML: merges missing columns and keeps comments', async () => {
+    const f = file('models', 'staging', 'stg_a.yml');
+    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(f));
+    const edit = new vscode.WorkspaceEdit();
+    edit.replace(doc.uri, new vscode.Range(doc.positionAt(0), doc.positionAt(doc.getText().length)), 'version: 2\nmodels:\n  - name: stg_a\n    description: "staging a" # keep me\n');
+    await vscode.workspace.applyEdit(edit);
+    await doc.save();
+    await vscode.commands.executeCommand('dbtRunner.generateYaml', uri('models', 'staging', 'stg_a.sql'));
+    const text = await docText(f);
+    assert.match(text, /# keep me/);
+    assert.match(text, /description: "?staging a"?/);
+    assert.match(text, /- name: id/);
+    await vscode.workspace.saveAll(false);
+  });
+
+  const labels = items => items.map(i => (typeof i.label === 'string' ? i.label : i.label.label));
+  const child = async (items, label) => {
+    const it = items.find(i => labels([i])[0] === label);
+    assert.ok(it, `no "${label}" in ${labels(items).join(', ')}`);
+    return it;
+  };
+
+  await step('sidebar: sections, model folders, sources, seeds, tests', async () => {
+    await vscode.commands.executeCommand('dbtRunner.parse'); // pick up the new YAML
+    const top = await api.sidebar.getChildren();
+    assert.deepEqual(labels(top), ['Models', 'Sources', 'Seeds', 'Tests']);
+    const models = await api.sidebar.getChildren(await child(top, 'Models'));
+    assert.deepEqual(labels(models), ['staging', 'b', 'c']);
+    assert.deepEqual(labels(await api.sidebar.getChildren(await child(models, 'staging'))), ['stg_a']);
+    const sources = await api.sidebar.getChildren(await child(top, 'Sources'));
+    assert.deepEqual(labels(await api.sidebar.getChildren(await child(sources, 'raw'))), ['customers', 'orders']);
+    assert.deepEqual(labels(await api.sidebar.getChildren(await child(top, 'Seeds'))), ['countries', 's']);
+    const groups = await api.sidebar.getChildren(await child(top, 'Tests'));
+    assert.deepEqual(labels(await api.sidebar.getChildren(await child(groups, 'b'))), ['not_null_b_id']);
+  });
+
+  await step('sidebar: run a model, build a folder, run a test', async () => {
+    const top = await api.sidebar.getChildren();
+    const models = await api.sidebar.getChildren(await child(top, 'Models'));
+    await vscode.commands.executeCommand('dbtRunner.tree.run', await child(models, 'b'));
+    assert.deepEqual(results(), ['model.demo.b']);
+    await vscode.commands.executeCommand('dbtRunner.tree.build', await child(models, 'staging'));
+    assert.deepEqual(results(), ['model.demo.stg_a']);
+    const groups = await api.sidebar.getChildren(await child(top, 'Tests'));
+    const tests = await api.sidebar.getChildren(await child(groups, 'b'));
+    await vscode.commands.executeCommand('dbtRunner.tree.runTest', tests[0]);
+    assert.equal(results().length, 1);
+    assert.match(results()[0], /^test\.demo\.not_null_b_id/);
+  });
+
   await step('go to definition without a manifest falls back to the file name', async () => {
     fs.rmSync(file('target', 'manifest.json'), { force: true });
     const d = await definition(['models', 'c.sql'], "'b'");
     assert.ok(d && same(d.file, file('models', 'b.sql')), JSON.stringify(d));
+  });
+
+  await step('sidebar without a manifest offers dbt parse', async () => {
+    const top = await api.sidebar.getChildren();
+    assert.equal(top.length, 1);
+    assert.equal(top[0].kind, 'noManifest');
+    assert.equal(top[0].command.command, 'dbtRunner.parse');
   });
 
   await step('right-click seed: one CSV in a subfolder', async () => {

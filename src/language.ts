@@ -1,13 +1,15 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { callAt, completionContext } from './jinja';
-import { ManifestIndex, parseManifest, resolveRef, sourceTableLine } from './manifest';
+import { callAt, completionContext, macroCallAt } from './jinja';
+import { ManifestIndex, macroDefinitionLine, parseManifest, resolveMacro, resolveRef, sourceTableLine } from './manifest';
 
 export interface LanguageDeps {
   projectRootOf(file: string): string | undefined;
   targetDirOf(root: string): string;
   projectNameOf(root: string): string | undefined;
+  /** `<venv>/.../site-packages/dbt/include`, where dbt's own and adapter macros live. */
+  dbtIncludeDir(): string | undefined;
 }
 
 const DBT_SQL_DIRS = /[\\/](models|macros|tests|snapshots|analyses)[\\/]/i;
@@ -18,7 +20,11 @@ const EXCLUDED = /[\\/](dbt_packages|target)[\\/]/i;
 // manifest doesn't block typing; concurrent requests share one in-flight read.
 const cache = new Map<string, { mtime: number; index: Promise<ManifestIndex | undefined> }>();
 
-async function loadManifest(deps: LanguageDeps, root: string): Promise<ManifestIndex | undefined> {
+export function clearManifestCache(): void {
+  cache.clear();
+}
+
+export async function loadManifest(deps: LanguageDeps, root: string): Promise<ManifestIndex | undefined> {
   const file = path.join(deps.targetDirOf(root), 'manifest.json');
   let mtime: number;
   try {
@@ -32,7 +38,7 @@ async function loadManifest(deps: LanguageDeps, root: string): Promise<ManifestI
   }
   const index = fs.promises
     .readFile(file, 'utf8')
-    .then(text => parseManifest(text, root, deps.projectNameOf(root) ?? path.basename(root)))
+    .then(text => parseManifest(text, root, deps.projectNameOf(root) ?? path.basename(root), deps.dbtIncludeDir()))
     .catch(() => undefined);
   cache.set(file, { mtime, index });
   return index;
@@ -42,9 +48,13 @@ class DbtDefinitionProvider implements vscode.DefinitionProvider {
   constructor(private readonly deps: LanguageDeps) {}
 
   async provideDefinition(doc: vscode.TextDocument, pos: vscode.Position): Promise<vscode.Location | undefined> {
-    const call = callAt(doc.lineAt(pos.line).text, pos.character);
-    const root = call && this.deps.projectRootOf(doc.uri.fsPath);
-    if (!call || !root) {
+    const lineText = doc.lineAt(pos.line).text;
+    const call = callAt(lineText, pos.character);
+    if (!call) {
+      return this.macroDefinition(doc, lineText, pos.character);
+    }
+    const root = this.deps.projectRootOf(doc.uri.fsPath);
+    if (!root) {
       return undefined;
     }
     const index = await loadManifest(this.deps, root);
@@ -72,6 +82,21 @@ class DbtDefinitionProvider implements vscode.DefinitionProvider {
     }
     const line = sourceTableLine(await fs.promises.readFile(src.file, 'utf8'), call.source, call.table);
     return new vscode.Location(vscode.Uri.file(src.file), new vscode.Position(line, 0));
+  }
+
+  private async macroDefinition(doc: vscode.TextDocument, lineText: string, col: number): Promise<vscode.Location | undefined> {
+    const call = macroCallAt(lineText, col);
+    const root = call && this.deps.projectRootOf(doc.uri.fsPath);
+    const index = root ? await loadManifest(this.deps, root) : undefined;
+    if (!call || !root || !index) {
+      return undefined;
+    }
+    const macro = resolveMacro(index.macros, call.name, call.package, this.deps.projectNameOf(root) ?? path.basename(root));
+    if (!macro?.file || !fs.existsSync(macro.file)) {
+      return undefined;
+    }
+    const line = macroDefinitionLine(await fs.promises.readFile(macro.file, 'utf8'), call.name);
+    return new vscode.Location(vscode.Uri.file(macro.file), new vscode.Position(line, 0));
   }
 }
 
