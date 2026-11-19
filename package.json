@@ -1,8 +1,8 @@
 {
   "name": "dbt-runner",
   "displayName": "dbt Runner",
-  "description": "Right-click dbt models in the Explorer to run, build or test them with dbt-core 1.x from a configured venv.",
-  "version": "0.1.0",
+  "description": "Run, build, test, compile and preview dbt models from the VS Code Explorer and editor with dbt-core 1.x from a configured venv.",
+  "version": "0.2.0",
   "publisher": "local",
   "license": "MIT",
   "engines": {
@@ -25,7 +25,8 @@
       {
         "command": "dbtRunner.build",
         "title": "dbt Build",
-        "category": "dbt Runner"
+        "category": "dbt Runner",
+        "icon": "$(play)"
       },
       {
         "command": "dbtRunner.test",
@@ -48,6 +49,46 @@
         "category": "dbt Runner"
       },
       {
+        "command": "dbtRunner.compile",
+        "title": "dbt Compile (show compiled SQL)",
+        "category": "dbt Runner"
+      },
+      {
+        "command": "dbtRunner.preview",
+        "title": "dbt Preview Data",
+        "category": "dbt Runner"
+      },
+      {
+        "command": "dbtRunner.deps",
+        "title": "dbt deps",
+        "category": "dbt Runner"
+      },
+      {
+        "command": "dbtRunner.seed",
+        "title": "dbt seed",
+        "category": "dbt Runner"
+      },
+      {
+        "command": "dbtRunner.snapshot",
+        "title": "dbt snapshot",
+        "category": "dbt Runner"
+      },
+      {
+        "command": "dbtRunner.docsGenerate",
+        "title": "dbt docs generate",
+        "category": "dbt Runner"
+      },
+      {
+        "command": "dbtRunner.selectTarget",
+        "title": "Switch Target",
+        "category": "dbt Runner"
+      },
+      {
+        "command": "dbtRunner.menu",
+        "title": "Show Menu",
+        "category": "dbt Runner"
+      },
+      {
         "command": "dbtRunner.openSettings",
         "title": "Open Settings",
         "category": "dbt Runner"
@@ -63,8 +104,21 @@
       "explorer/context": [
         {
           "submenu": "dbtRunner.submenu",
-          "when": "resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models[\\\\/]/i && resourcePath not =~ /[\\\\/](dbt_packages|target)[\\\\/]/i",
+          "when": "(resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models([\\\\/]|$)/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i) || (explorerResourceIsFolder && resourcePath =~ /[\\\\/]models([\\\\/]|$)/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i)",
           "group": "navigation@90"
+        }
+      ],
+      "editor/title/context": [
+        {
+          "submenu": "dbtRunner.submenu",
+          "when": "resourceScheme == file && resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models([\\\\/]|$)/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "dbtRunner.build",
+          "when": "resourceScheme == file && resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models([\\\\/]|$)/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i",
+          "group": "navigation@-10"
         }
       ],
       "dbtRunner.submenu": [
@@ -82,51 +136,70 @@
         },
         {
           "command": "dbtRunner.buildUpstream",
-          "group": "graph@1"
+          "group": "graph@1",
+          "when": "!explorerResourceIsFolder"
         },
         {
           "command": "dbtRunner.buildDownstream",
-          "group": "graph@2"
+          "group": "graph@2",
+          "when": "!explorerResourceIsFolder"
         },
         {
           "command": "dbtRunner.buildUpDownstream",
-          "group": "graph@3"
+          "group": "graph@3",
+          "when": "!explorerResourceIsFolder"
+        },
+        {
+          "command": "dbtRunner.compile",
+          "group": "inspect@1",
+          "when": "!explorerResourceIsFolder"
+        },
+        {
+          "command": "dbtRunner.preview",
+          "group": "inspect@2",
+          "when": "!explorerResourceIsFolder"
         },
         {
           "command": "dbtRunner.openSettings",
           "group": "z@1"
         }
       ],
-      "editor/title/context": [
-        {
-          "submenu": "dbtRunner.submenu",
-          "when": "resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models[\\\\/]/i && resourcePath not =~ /[\\\\/](dbt_packages|target)[\\\\/]/i"
-        }
-      ],
       "commandPalette": [
         {
           "command": "dbtRunner.run",
-          "when": "resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models[\\\\/]/i && resourcePath not =~ /[\\\\/](dbt_packages|target)[\\\\/]/i"
+          "when": "editorIsOpen && resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models([\\\\/]|$)/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
         },
         {
           "command": "dbtRunner.build",
-          "when": "resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models[\\\\/]/i && resourcePath not =~ /[\\\\/](dbt_packages|target)[\\\\/]/i"
+          "when": "editorIsOpen && resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models([\\\\/]|$)/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
         },
         {
           "command": "dbtRunner.test",
-          "when": "resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models[\\\\/]/i && resourcePath not =~ /[\\\\/](dbt_packages|target)[\\\\/]/i"
+          "when": "editorIsOpen && resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models([\\\\/]|$)/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
         },
         {
           "command": "dbtRunner.buildUpstream",
-          "when": "resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models[\\\\/]/i && resourcePath not =~ /[\\\\/](dbt_packages|target)[\\\\/]/i"
+          "when": "editorIsOpen && resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models([\\\\/]|$)/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
         },
         {
           "command": "dbtRunner.buildDownstream",
-          "when": "resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models[\\\\/]/i && resourcePath not =~ /[\\\\/](dbt_packages|target)[\\\\/]/i"
+          "when": "editorIsOpen && resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models([\\\\/]|$)/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
         },
         {
           "command": "dbtRunner.buildUpDownstream",
-          "when": "resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models[\\\\/]/i && resourcePath not =~ /[\\\\/](dbt_packages|target)[\\\\/]/i"
+          "when": "editorIsOpen && resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models([\\\\/]|$)/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
+        },
+        {
+          "command": "dbtRunner.compile",
+          "when": "editorIsOpen && resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models([\\\\/]|$)/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
+        },
+        {
+          "command": "dbtRunner.preview",
+          "when": "editorIsOpen && resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models([\\\\/]|$)/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
+        },
+        {
+          "command": "dbtRunner.menu",
+          "when": "false"
         }
       ]
     },
@@ -146,7 +219,13 @@
         "dbtRunner.extraArgs": {
           "type": "string",
           "default": "",
-          "description": "Extra flags appended to every dbt command, separated by spaces."
+          "description": "Extra flags appended to every dbt command except deps, separated by spaces (quotes keep values together)."
+        },
+        "dbtRunner.previewLimit": {
+          "type": "number",
+          "default": 100,
+          "minimum": 1,
+          "description": "Maximum number of rows returned by dbt Preview Data (dbt show --limit)."
         }
       }
     },
@@ -154,16 +233,49 @@
       {
         "type": "dbtRunner",
         "required": [
-          "action"
+          "id"
         ],
         "properties": {
-          "action": {
+          "title": {
             "type": "string"
           },
-          "models": {
-            "type": "array"
+          "id": {
+            "type": "number",
+            "description": "Unique run id"
           }
         }
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "dbtRunner.build",
+        "key": "ctrl+' b",
+        "mac": "cmd+' b",
+        "when": "resourceScheme == file && editorTextFocus && resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models([\\\\/]|$)/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
+      },
+      {
+        "command": "dbtRunner.run",
+        "key": "ctrl+' r",
+        "mac": "cmd+' r",
+        "when": "resourceScheme == file && editorTextFocus && resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models([\\\\/]|$)/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
+      },
+      {
+        "command": "dbtRunner.test",
+        "key": "ctrl+' t",
+        "mac": "cmd+' t",
+        "when": "resourceScheme == file && editorTextFocus && resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models([\\\\/]|$)/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
+      },
+      {
+        "command": "dbtRunner.compile",
+        "key": "ctrl+' c",
+        "mac": "cmd+' c",
+        "when": "resourceScheme == file && editorTextFocus && resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models([\\\\/]|$)/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
+      },
+      {
+        "command": "dbtRunner.preview",
+        "key": "ctrl+' p",
+        "mac": "cmd+' p",
+        "when": "resourceScheme == file && editorTextFocus && resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models([\\\\/]|$)/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
       }
     ]
   },
@@ -182,11 +294,15 @@
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": "limited",
-      "description": "In untrusted workspaces, the dbt venv path and extra flags are only read from your user settings.",
+      "description": "dbt commands are disabled in untrusted workspaces because dbt executes the project’s macros and hooks. The venv path, target and extra flags are only read from your user settings there.",
       "restrictedConfigurations": [
         "dbtRunner.venvPath",
-        "dbtRunner.extraArgs"
+        "dbtRunner.extraArgs",
+        "dbtRunner.target"
       ]
     }
+  },
+  "dependencies": {
+    "yaml": "^2.9.1"
   }
 }

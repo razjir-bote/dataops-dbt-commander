@@ -1,6 +1,6 @@
 import * as path from 'path';
 
-export type DbtAction = 'run' | 'build' | 'test';
+export type DbtAction = 'run' | 'build' | 'test' | 'compile' | 'show';
 
 function insideDbtPackages(dir: string): boolean {
   return dir.split(/[\\/]/).some(seg => seg.toLowerCase() === 'dbt_packages');
@@ -76,13 +76,13 @@ export function splitArgs(input: string): string[] {
   return args;
 }
 
+/** `--target` (when set) plus the user's extra flags. */
+export function flagArgs(target: string, extraArgs: string): string[] {
+  return [...(target.trim() ? ['--target', target.trim()] : []), ...splitArgs(extraArgs)];
+}
+
 export function buildArgs(action: DbtAction, selectors: string[], target: string, extraArgs: string): string[] {
-  const args = [action, '--select', ...selectors];
-  if (target.trim()) {
-    args.push('--target', target.trim());
-  }
-  args.push(...splitArgs(extraArgs));
-  return args;
+  return [action, '--select', ...selectors, ...flagArgs(target, extraArgs)];
 }
 
 /** Locate dbt inside a venv: Windows layout first, then POSIX. */

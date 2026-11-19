@@ -5,4 +5,6 @@ docs/**
 .superpowers/**
 tsconfig.json
 .gitignore
-node_modules/**
+node_modules/yaml/browser/**
+node_modules/yaml/dist/**/*.d.ts
+node_modules/.package-lock.json

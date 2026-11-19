@@ -39,19 +39,24 @@ export class SettingsPanel {
   private static current: SettingsPanel | undefined;
   private readonly disposables: vscode.Disposable[] = [];
 
-  static show(context: vscode.ExtensionContext, onSaved: () => void): void {
+  static show(context: vscode.ExtensionContext, onSaved: () => void, getTargets: () => string[] = () => []): void {
     if (SettingsPanel.current) {
       SettingsPanel.current.panel.reveal();
       return;
     }
     const panel = vscode.window.createWebviewPanel('dbtRunnerSettings', 'dbt Runner Settings', vscode.ViewColumn.Active, {
       enableScripts: true,
-      retainContextWhenHidden: true
+      retainContextWhenHidden: true,
+      localResourceRoots: []
     });
-    SettingsPanel.current = new SettingsPanel(panel, onSaved);
+    SettingsPanel.current = new SettingsPanel(panel, onSaved, getTargets);
   }
 
-  private constructor(private readonly panel: vscode.WebviewPanel, private readonly onSaved: () => void) {
+  private constructor(
+    private readonly panel: vscode.WebviewPanel,
+    private readonly onSaved: () => void,
+    private readonly getTargets: () => string[]
+  ) {
     panel.webview.html = this.html();
     panel.onDidDispose(() => this.dispose(), null, this.disposables);
     panel.webview.onDidReceiveMessage(msg => this.onMessage(msg), null, this.disposables);
@@ -76,6 +81,7 @@ export class SettingsPanel {
           extraArgs: cfg.get<string>('extraArgs', '')
         };
         this.post({ type: 'state', state });
+        this.post({ type: 'targets', targets: this.getTargets() });
         await this.check(state.venvPath);
         break;
       }
@@ -166,7 +172,8 @@ export class SettingsPanel {
 
   <div class="field">
     <label for="target">Target</label>
-    <input id="target" type="text" placeholder="(profile default)" spellcheck="false">
+    <input id="target" type="text" placeholder="(profile default)" spellcheck="false" list="targetList">
+    <datalist id="targetList"></datalist>
     <div class="hint">Passed as <code>--target</code>. Leave blank to use the profile's default.</div>
   </div>
 
@@ -217,6 +224,11 @@ export class SettingsPanel {
         if (i.error) setVersion('err', i.error);
         else if (i.major !== 1) setVersion('warn', 'dbt ' + i.version + ' — this extension supports dbt-core 1.x only. Commands may not work.');
         else setVersion('ok', 'dbt-core ' + i.version);
+        break;
+      }
+      case 'targets': {
+        const list = document.getElementById('targetList');
+        list.replaceChildren(...msg.targets.map(t => { const o = document.createElement('option'); o.value = t; return o; }));
         break;
       }
       case 'saved':
