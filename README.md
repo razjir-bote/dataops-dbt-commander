@@ -16,7 +16,7 @@ Supports dbt-core 1.x (tested with 1.12); not dbt 2 / Fusion.
 - **Errors in the Problems panel**: compilation/runtime/database errors on the model (with the line when dbt
   gives one), test failures and warnings on the YAML file. A model's problems are replaced when it runs again.
 - **Target switcher** in the status bar, listing the targets from your `profiles.yml`.
-- **Project commands** — `deps`, `seed`, `snapshot`, `docs generate` — from the `dbt` status bar menu
+- **Project commands** — `deps`, `seed`, `snapshot`, and `docs generate` (builds the static docs page and opens it in your browser) — from the `dbt` status bar menu
   or the command palette.
 
 ## Setup

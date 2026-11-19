@@ -247,18 +247,34 @@ async function previewModel(uri?: vscode.Uri): Promise<void> {
 }
 let previewSeq = 0;
 
-async function projectCommand(args: string[], label: string): Promise<void> {
+/** Runs a project-level dbt command; resolves with the project root and exit code (undefined if it didn't run). */
+async function projectCommand(args: string[], label: string): Promise<{ root: string; code: number | undefined } | undefined> {
   const root = await pickProjectRoot(true);
   if (!root) {
     void vscode.window.showErrorMessage('dbt Runner: no dbt project (dbt_project.yml) found in this workspace.');
-    return;
+    return undefined;
   }
   const exe = await requireExe();
   if (!exe) {
-    return;
+    return undefined;
   }
   const flags = args[0] === 'deps' ? [] : flagArgs(cfg().get<string>('target', ''), cfg().get<string>('extraArgs', ''));
-  await runDbtTask({ exe, args: [...args, ...flags], cwd: root, title: label, diagnostics, targetDir: targetDirOf(root), folder: workspaceFolderOf(root) });
+  const code = await runDbtTask({ exe, args: [...args, ...flags], cwd: root, title: label, diagnostics, targetDir: targetDirOf(root), folder: workspaceFolderOf(root) });
+  return { root, code };
+}
+
+/** `dbt docs generate --static` writes a self-contained static_index.html; open it in the browser. */
+async function docsGenerate(): Promise<void> {
+  const result = await projectCommand(['docs', 'generate', '--static'], 'docs generate');
+  if (!result || result.code !== 0) {
+    return;
+  }
+  const page = path.join(targetDirOf(result.root), 'static_index.html');
+  if (!exists(page)) {
+    void vscode.window.showWarningMessage(`dbt Runner: static docs page not found at ${page}`);
+    return;
+  }
+  await vscode.env.openExternal(vscode.Uri.file(page));
 }
 
 async function selectTarget(): Promise<void> {
@@ -289,7 +305,7 @@ async function showMenu(): Promise<void> {
     { label: '$(package) dbt deps', command: 'dbtRunner.deps' },
     { label: '$(table) dbt seed', command: 'dbtRunner.seed' },
     { label: '$(history) dbt snapshot', command: 'dbtRunner.snapshot' },
-    { label: '$(book) dbt docs generate', command: 'dbtRunner.docsGenerate' },
+    { label: '$(book) dbt docs generate', description: 'build static docs and open in browser', command: 'dbtRunner.docsGenerate' },
     { label: '$(target) Switch target…', command: 'dbtRunner.selectTarget' },
     { label: '$(gear) Settings', command: 'dbtRunner.openSettings' }
   ];
@@ -396,7 +412,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('dbtRunner.deps', () => projectCommand(['deps'], 'deps')),
     vscode.commands.registerCommand('dbtRunner.seed', () => projectCommand(['seed'], 'seed')),
     vscode.commands.registerCommand('dbtRunner.snapshot', () => projectCommand(['snapshot'], 'snapshot')),
-    vscode.commands.registerCommand('dbtRunner.docsGenerate', () => projectCommand(['docs', 'generate'], 'docs generate')),
+    vscode.commands.registerCommand('dbtRunner.docsGenerate', docsGenerate),
     vscode.commands.registerCommand('dbtRunner.selectTarget', selectTarget),
     vscode.commands.registerCommand('dbtRunner.menu', showMenu),
     vscode.commands.registerCommand('dbtRunner.openSettings', openSettings),
