@@ -1,0 +1,192 @@
+{
+  "name": "dbt-runner",
+  "displayName": "dbt Runner",
+  "description": "Right-click dbt models in the Explorer to run, build or test them with dbt-core 1.x from a configured venv.",
+  "version": "0.1.0",
+  "publisher": "local",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "workspaceContains:**/dbt_project.yml"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "dbtRunner.run",
+        "title": "dbt Run",
+        "category": "dbt Runner"
+      },
+      {
+        "command": "dbtRunner.build",
+        "title": "dbt Build",
+        "category": "dbt Runner"
+      },
+      {
+        "command": "dbtRunner.test",
+        "title": "dbt Test",
+        "category": "dbt Runner"
+      },
+      {
+        "command": "dbtRunner.buildUpstream",
+        "title": "dbt Build + Upstream",
+        "category": "dbt Runner"
+      },
+      {
+        "command": "dbtRunner.buildDownstream",
+        "title": "dbt Build + Downstream",
+        "category": "dbt Runner"
+      },
+      {
+        "command": "dbtRunner.buildUpDownstream",
+        "title": "dbt Build + Upstream & Downstream",
+        "category": "dbt Runner"
+      },
+      {
+        "command": "dbtRunner.openSettings",
+        "title": "Open Settings",
+        "category": "dbt Runner"
+      }
+    ],
+    "submenus": [
+      {
+        "id": "dbtRunner.submenu",
+        "label": "dbt"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "submenu": "dbtRunner.submenu",
+          "when": "resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models[\\\\/]/i && resourcePath not =~ /[\\\\/](dbt_packages|target)[\\\\/]/i",
+          "group": "navigation@90"
+        }
+      ],
+      "dbtRunner.submenu": [
+        {
+          "command": "dbtRunner.run",
+          "group": "dbt@1"
+        },
+        {
+          "command": "dbtRunner.build",
+          "group": "dbt@2"
+        },
+        {
+          "command": "dbtRunner.test",
+          "group": "dbt@3"
+        },
+        {
+          "command": "dbtRunner.buildUpstream",
+          "group": "graph@1"
+        },
+        {
+          "command": "dbtRunner.buildDownstream",
+          "group": "graph@2"
+        },
+        {
+          "command": "dbtRunner.buildUpDownstream",
+          "group": "graph@3"
+        },
+        {
+          "command": "dbtRunner.openSettings",
+          "group": "z@1"
+        }
+      ],
+      "editor/title/context": [
+        {
+          "submenu": "dbtRunner.submenu",
+          "when": "resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models[\\\\/]/i && resourcePath not =~ /[\\\\/](dbt_packages|target)[\\\\/]/i"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "dbtRunner.run",
+          "when": "resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models[\\\\/]/i && resourcePath not =~ /[\\\\/](dbt_packages|target)[\\\\/]/i"
+        },
+        {
+          "command": "dbtRunner.build",
+          "when": "resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models[\\\\/]/i && resourcePath not =~ /[\\\\/](dbt_packages|target)[\\\\/]/i"
+        },
+        {
+          "command": "dbtRunner.test",
+          "when": "resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models[\\\\/]/i && resourcePath not =~ /[\\\\/](dbt_packages|target)[\\\\/]/i"
+        },
+        {
+          "command": "dbtRunner.buildUpstream",
+          "when": "resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models[\\\\/]/i && resourcePath not =~ /[\\\\/](dbt_packages|target)[\\\\/]/i"
+        },
+        {
+          "command": "dbtRunner.buildDownstream",
+          "when": "resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models[\\\\/]/i && resourcePath not =~ /[\\\\/](dbt_packages|target)[\\\\/]/i"
+        },
+        {
+          "command": "dbtRunner.buildUpDownstream",
+          "when": "resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models[\\\\/]/i && resourcePath not =~ /[\\\\/](dbt_packages|target)[\\\\/]/i"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "dbt Runner",
+      "properties": {
+        "dbtRunner.venvPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the Python virtual environment that has dbt-core 1.x installed (the folder containing Scripts\\dbt.exe)."
+        },
+        "dbtRunner.target": {
+          "type": "string",
+          "default": "",
+          "description": "Optional dbt target passed as --target."
+        },
+        "dbtRunner.extraArgs": {
+          "type": "string",
+          "default": "",
+          "description": "Extra flags appended to every dbt command, separated by spaces."
+        }
+      }
+    },
+    "taskDefinitions": [
+      {
+        "type": "dbtRunner",
+        "required": [
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "models": {
+            "type": "array"
+          }
+        }
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "watch": "tsc -watch -p .",
+    "test": "node --test out/test/",
+    "package": "vsce package --allow-missing-repository"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.90.0",
+    "@vscode/vsce": "^3.0.0",
+    "typescript": "^5.4.0"
+  },
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "In untrusted workspaces, the dbt venv path and extra flags are only read from your user settings.",
+      "restrictedConfigurations": [
+        "dbtRunner.venvPath",
+        "dbtRunner.extraArgs"
+      ]
+    }
+  }
+}

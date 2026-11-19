@@ -1,0 +1,8 @@
+src/**
+out/test/**
+**/*.map
+docs/**
+.superpowers/**
+tsconfig.json
+.gitignore
+node_modules/**
