@@ -16,8 +16,16 @@ Supports dbt-core 1.x (tested with 1.12); not dbt 2 / Fusion.
 - **Errors in the Problems panel**: compilation/runtime/database errors on the model (with the line when dbt
   gives one), test failures and warnings on the YAML file. A model's problems are replaced when it runs again.
 - **Target switcher** in the status bar, listing the targets from your `profiles.yml`.
-- **Project commands** — `deps`, `seed`, `snapshot`, and `docs generate` (builds the static docs page and opens it in your browser) — from the `dbt` status bar menu
-  or the command palette.
+- **Project commands** — `deps`, `seed`, `snapshot`, and `docs generate` (builds the static docs page and opens
+  it in your browser; `dbtRunner.openDocsAfterGenerate`) — from the `dbt` status bar menu or the command palette.
+- **Run links above each model** — `Run · Build · Test · Compile · Preview` (`dbtRunner.codeLens` to turn off).
+- **Go to definition** — Ctrl+click / F12 on `ref('model')`, `ref('package', 'model')`, `ref('model', v=2)` opens
+  the model; on `source('src', 'table')` opens the sources YAML at that table.
+- **Autocomplete** — model names inside `ref('`, source names inside `source('`, and that source's tables in its
+  second argument.
+
+Go to definition and autocomplete read `target/manifest.json`, which dbt rewrites on every run, build, compile or
+parse — so they reflect your last dbt command. Without a manifest, `ref()` still jumps to a model file of that name.
 
 ## Setup
 
@@ -31,3 +39,17 @@ Settings are saved per workspace. Extra flags apply to every command except `dep
 
 dbt runs your project's macros and hooks, so dbt Runner only runs in **trusted** workspaces, and in untrusted
 ones the venv path, target and extra flags are read from your user settings only.
+
+## Development
+
+```bash
+npm install
+npm run typecheck        # tsc, no output
+npm run compile && npm test   # unit tests (node:test)
+npm run test:integration # real VS Code + dbt-core 1.12 + duckdb against test/fixtures/demo
+npm run package          # builds dist/ with esbuild and creates the .vsix
+```
+
+`test:integration` creates a dbt venv in `.vscode-test/dbt-venv` on first run (set `DBT_PYTHON` to choose the
+Python). CI (`.github/workflows/ci.yml`) runs all of this on Windows for every push and pull request, and
+publishes a GitHub release with the `.vsix` when a `v*` tag matching `package.json`'s version is pushed.

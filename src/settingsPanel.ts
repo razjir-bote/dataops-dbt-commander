@@ -41,7 +41,12 @@ export class SettingsPanel {
 
   static show(context: vscode.ExtensionContext, onSaved: () => void, getTargets: () => string[] = () => []): void {
     if (SettingsPanel.current) {
-      SettingsPanel.current.panel.reveal();
+      // Reopened: show current settings, not whatever the panel loaded first.
+      const p = SettingsPanel.current;
+      p.onSaved = onSaved;
+      p.getTargets = getTargets;
+      p.panel.reveal();
+      void p.sendState(true);
       return;
     }
     const panel = vscode.window.createWebviewPanel('dbtRunnerSettings', 'dbt Runner Settings', vscode.ViewColumn.Active, {
@@ -54,8 +59,8 @@ export class SettingsPanel {
 
   private constructor(
     private readonly panel: vscode.WebviewPanel,
-    private readonly onSaved: () => void,
-    private readonly getTargets: () => string[]
+    private onSaved: () => void,
+    private getTargets: () => string[]
   ) {
     panel.webview.html = this.html();
     panel.onDidDispose(() => this.dispose(), null, this.disposables);
@@ -71,20 +76,24 @@ export class SettingsPanel {
     this.post({ type: 'version', info: await detectDbtVersion(venvPath) });
   }
 
+  /** `soft`: the panel was reopened; the webview keeps unsaved edits instead of overwriting them. */
+  private async sendState(soft = false): Promise<void> {
+    const cfg = vscode.workspace.getConfiguration('dbtRunner');
+    const state = {
+      venvPath: cfg.get<string>('venvPath', ''),
+      target: cfg.get<string>('target', ''),
+      extraArgs: cfg.get<string>('extraArgs', '')
+    };
+    this.post({ type: 'state', state, soft });
+    this.post({ type: 'targets', targets: this.getTargets() });
+    await this.check(state.venvPath);
+  }
+
   private async onMessage(msg: any): Promise<void> {
     switch (msg.type) {
-      case 'ready': {
-        const cfg = vscode.workspace.getConfiguration('dbtRunner');
-        const state = {
-          venvPath: cfg.get<string>('venvPath', ''),
-          target: cfg.get<string>('target', ''),
-          extraArgs: cfg.get<string>('extraArgs', '')
-        };
-        this.post({ type: 'state', state });
-        this.post({ type: 'targets', targets: this.getTargets() });
-        await this.check(state.venvPath);
+      case 'ready':
+        await this.sendState();
         break;
-      }
       case 'browse': {
         const picked = await vscode.window.showOpenDialog({
           canSelectFolders: true,
@@ -105,10 +114,24 @@ export class SettingsPanel {
       case 'save': {
         const cfg = vscode.workspace.getConfiguration('dbtRunner');
         const target = settingsTarget();
-        await cfg.update('venvPath', String(msg.venvPath ?? '').trim(), target);
-        await cfg.update('target', String(msg.target ?? '').trim(), target);
-        await cfg.update('extraArgs', String(msg.extraArgs ?? '').trim(), target);
-        this.post({ type: 'saved' });
+        // A cleared field removes the setting instead of storing "".
+        const value = (v: unknown) => String(v ?? '').trim() || undefined;
+        try {
+          await cfg.update('venvPath', value(msg.venvPath), target);
+          await cfg.update('target', value(msg.target), target);
+          await cfg.update('extraArgs', value(msg.extraArgs), target);
+        } catch (err) {
+          this.post({ type: 'saveError', message: err instanceof Error ? err.message : String(err) });
+          break;
+        }
+        // A field cleared here may still be set at a broader level (e.g. User settings) — say so.
+        const after = vscode.workspace.getConfiguration('dbtRunner');
+        const labels: Record<string, string> = { venvPath: 'venv path', target: 'target', extraArgs: 'extra flags' };
+        const inherited = Object.keys(labels).filter(k => !value(msg[k]) && String(after.get(k) ?? '').trim());
+        const note = inherited.length
+          ? `Still set in your User settings: ${inherited.map(k => `${labels[k]} = "${after.get(k)}"`).join(', ')}.`
+          : undefined;
+        this.post({ type: 'saved', note });
         this.onSaved();
         break;
       }
@@ -150,6 +173,7 @@ export class SettingsPanel {
   .version.err { border-left-color: var(--vscode-editorError-foreground, #f85149); }
   .actions { display: flex; align-items: center; gap: 12px; margin-top: 28px; }
   #status { color: var(--vscode-descriptionForeground); }
+  #status.error { color: var(--vscode-errorForeground); }
 </style>
 </head>
 <body>
@@ -193,16 +217,18 @@ export class SettingsPanel {
   const $ = id => document.getElementById(id);
   const venv = $('venv'), target = $('target'), extra = $('extra'), version = $('version'), status = $('status');
   let timer;
+  let dirty = false; // unsaved edits in the form
 
   function setVersion(cls, text) { version.className = 'version ' + cls; version.textContent = text; }
 
   $('browse').addEventListener('click', () => vscode.postMessage({ type: 'browse' }));
   venv.addEventListener('input', () => {
+    dirty = true;
     status.textContent = '';
     clearTimeout(timer);
     timer = setTimeout(() => vscode.postMessage({ type: 'check', venvPath: venv.value }), 500);
   });
-  [target, extra].forEach(el => el.addEventListener('input', () => { status.textContent = ''; }));
+  [target, extra].forEach(el => el.addEventListener('input', () => { dirty = true; status.textContent = ''; }));
   $('save').addEventListener('click', () => vscode.postMessage({
     type: 'save', venvPath: venv.value, target: target.value, extraArgs: extra.value
   }));
@@ -211,10 +237,12 @@ export class SettingsPanel {
     const msg = e.data;
     switch (msg.type) {
       case 'state':
+        if (msg.soft && dirty) break; // panel reopened: keep the user's unsaved edits
         venv.value = msg.state.venvPath; target.value = msg.state.target; extra.value = msg.state.extraArgs;
+        dirty = false;
         break;
       case 'venvPicked':
-        venv.value = msg.venvPath; status.textContent = '';
+        venv.value = msg.venvPath; status.textContent = ''; dirty = true;
         break;
       case 'checking':
         setVersion('', 'Checking…');
@@ -232,7 +260,13 @@ export class SettingsPanel {
         break;
       }
       case 'saved':
-        status.textContent = 'Saved.';
+        dirty = false;
+        status.className = '';
+        status.textContent = 'Saved.' + (msg.note ? ' ' + msg.note : '');
+        break;
+      case 'saveError':
+        status.className = 'error';
+        status.textContent = 'Could not save: ' + msg.message;
         break;
     }
   });

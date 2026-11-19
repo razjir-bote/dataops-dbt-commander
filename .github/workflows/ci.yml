@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write # needed to publish releases on tags
+
+jobs:
+  test:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-python@v5
+        id: python
+        with:
+          python-version: '3.12'
+
+      - name: Cache dbt venv
+        uses: actions/cache@v4
+        with:
+          path: .vscode-test/dbt-venv
+          # The venv points at the exact interpreter, so the key includes its full version.
+          key: dbt-venv-${{ runner.os }}-py${{ steps.python.outputs.python-version }}-dbt1.12-v1
+
+      - run: npm ci
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm run compile && npm test
+
+      - name: Integration tests (VS Code + dbt-core 1.12 + duckdb)
+        env:
+          DBT_PYTHON: python
+        run: npm run test:integration
+
+      - name: Package
+        run: npx vsce package
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vsix
+          path: '*.vsix'
+
+      - name: Publish GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="v$(node -p "require('./package.json').version")"
+          if [ "$version" != "$GITHUB_REF_NAME" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match package.json version $version" >&2
+            exit 1
+          fi
+          gh release create "$GITHUB_REF_NAME" ./*.vsix --title "dbt Runner $GITHUB_REF_NAME" --generate-notes

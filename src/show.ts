@@ -8,6 +8,16 @@ export interface ShowResult {
   error?: string;
 }
 
+/**
+ * JSON.parse that keeps integers outside JavaScript's safe range as their exact source text
+ * (e.g. 38-digit warehouse keys), using the reviver's source-text access.
+ */
+function parsePreservingBigInts(text: string): Record<string, unknown>[] {
+  return JSON.parse(text, ((_key: string, value: unknown, ctx?: { source?: string }) =>
+    typeof value === 'number' && !Number.isSafeInteger(value) && ctx?.source && /^-?\d+$/.test(ctx.source) ? ctx.source : value
+  ) as (this: unknown, key: string, value: unknown) => unknown);
+}
+
 /** Parse `dbt show --output json --log-format json` output (dbt-core 1.x). */
 export function parseShowOutput(output: string): ShowResult {
   let error: string | undefined;
@@ -23,7 +33,7 @@ export function parseShowOutput(output: string): ShowResult {
     }
     if (ev?.info?.name === 'ShowNode' && typeof ev.data?.preview === 'string') {
       try {
-        return { rows: JSON.parse(ev.data.preview) };
+        return { rows: parsePreservingBigInts(ev.data.preview) };
       } catch {
         return { error: 'Could not read the preview returned by dbt.' };
       }

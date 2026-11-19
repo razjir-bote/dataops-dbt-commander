@@ -17,6 +17,20 @@ test('parseShowOutput returns the preview rows', () => {
   assert.deepEqual(parseShowOutput(showOk), { rows: [{ id: 1 }] });
 });
 
+// JSON.parse source-text access: Node 21+ / VS Code's Electron (checked again in the integration suite).
+let hasSourceText = false;
+JSON.parse('[1]', ((_k: string, v: unknown, ctx?: { source?: string }) => ((hasSourceText ||= !!ctx?.source), v)) as any);
+
+test('parseShowOutput keeps integers beyond 2^53 exact', { skip: !hasSourceText && 'runtime lacks JSON.parse source text access' }, () => {
+  const preview = '[{"id": 12345678901234567890, "n": -98765432109876543210, "x": 1.5, "s": 3, "big_dec": 1e400}]';
+  const line = JSON.stringify({ data: { preview }, info: { name: 'ShowNode', level: 'info' } });
+  const rows = parseShowOutput(line).rows!;
+  assert.equal(rows[0].id, '12345678901234567890');
+  assert.equal(rows[0].n, '-98765432109876543210');
+  assert.equal(rows[0].x, 1.5);
+  assert.equal(rows[0].s, 3);
+});
+
 test('parseShowOutput returns the dbt error text when there is no preview', () => {
   const r = parseShowOutput(showErr);
   assert.equal(r.rows, undefined);

@@ -20,6 +20,7 @@ import { DbtDiagnostics, killTree, runDbtTask } from './runner';
 import { listTargets, parseProjectFile, profilesDirCandidates } from './profiles';
 import { compiledPath, parseShowOutput } from './show';
 import { PreviewPanel } from './previewPanel';
+import { registerLanguageFeatures } from './language';
 
 let statusItem: vscode.StatusBarItem;
 let targetItem: vscode.StatusBarItem;
@@ -274,7 +275,11 @@ async function docsGenerate(): Promise<void> {
     void vscode.window.showWarningMessage(`dbt Runner: static docs page not found at ${page}`);
     return;
   }
-  await vscode.env.openExternal(vscode.Uri.file(page));
+  if (cfg().get<boolean>('openDocsAfterGenerate', true)) {
+    await vscode.env.openExternal(vscode.Uri.file(page));
+  } else {
+    void vscode.window.showInformationMessage(`dbt Runner: docs written to ${page}`);
+  }
 }
 
 async function selectTarget(): Promise<void> {
@@ -301,6 +306,7 @@ async function selectTarget(): Promise<void> {
 }
 
 async function showMenu(): Promise<void> {
+  void refreshStatus(); // dbt may have been installed into the venv since the last check
   const items: (vscode.QuickPickItem & { command: string })[] = [
     { label: '$(package) dbt deps', command: 'dbtRunner.deps' },
     { label: '$(table) dbt seed', command: 'dbtRunner.seed' },
@@ -424,8 +430,19 @@ export function activate(ctx: vscode.ExtensionContext): void {
         void refreshTarget();
       }
     }),
-    vscode.window.onDidChangeActiveTextEditor(() => void refreshTarget())
+    vscode.window.onDidChangeActiveTextEditor(() => void refreshTarget()),
+    vscode.window.onDidChangeWindowState(s => {
+      if (s.focused) {
+        void refreshStatus();
+      }
+    })
   );
+
+  registerLanguageFeatures(ctx, {
+    projectRootOf: file => findProjectRoot(file, exists, stopAt(file)),
+    targetDirOf,
+    projectNameOf: root => readProject(root).name
+  });
 
   void refreshStatus();
   void refreshTarget();

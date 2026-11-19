@@ -2,7 +2,7 @@
   "name": "dbt-runner",
   "displayName": "dbt Runner",
   "description": "Run, build, test, compile and preview dbt models from the VS Code Explorer and editor with dbt-core 1.x from a configured venv.",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "publisher": "local",
   "license": "MIT",
   "engines": {
@@ -11,7 +11,7 @@
   "categories": [
     "Other"
   ],
-  "main": "./out/extension.js",
+  "main": "./dist/extension.js",
   "activationEvents": [
     "workspaceContains:**/dbt_project.yml"
   ],
@@ -226,6 +226,16 @@
           "default": 100,
           "minimum": 1,
           "description": "Maximum number of rows returned by dbt Preview Data (dbt show --limit)."
+        },
+        "dbtRunner.codeLens": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show Run · Build · Test · Compile · Preview links above each dbt model."
+        },
+        "dbtRunner.openDocsAfterGenerate": {
+          "type": "boolean",
+          "default": true,
+          "description": "Open the static docs page in your browser after dbt docs generate."
         }
       }
     },
@@ -280,15 +290,21 @@
     ]
   },
   "scripts": {
+    "build": "esbuild src/extension.ts --bundle --platform=node --target=node18 --format=cjs --external:vscode --outfile=dist/extension.js --sourcemap",
+    "typecheck": "tsc --noEmit -p .",
     "compile": "tsc -p .",
-    "watch": "tsc -watch -p .",
+    "watch": "npm run build -- --watch",
     "test": "node --test out/test/",
+    "test:integration": "npm run build && node test/integration/run.js",
+    "vscode:prepublish": "npm run build",
     "package": "vsce package --allow-missing-repository"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.90.0",
+    "@vscode/test-electron": "^2.5.2",
     "@vscode/vsce": "^3.0.0",
+    "esbuild": "^0.24.2",
     "typescript": "^5.4.0"
   },
   "capabilities": {
@@ -304,5 +320,9 @@
   },
   "dependencies": {
     "yaml": "^2.9.1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/razjir-bote/vscode-dbt-runner.git"
   }
 }

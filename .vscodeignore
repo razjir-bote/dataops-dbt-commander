@@ -1,10 +1,11 @@
 src/**
-out/test/**
-**/*.map
+out/**
+test/**
 docs/**
+node_modules/**
+.github/**
 .superpowers/**
+.vscode-test/**
+**/*.map
 tsconfig.json
 .gitignore
-node_modules/yaml/browser/**
-node_modules/yaml/dist/**/*.d.ts
-node_modules/.package-lock.json
