@@ -7,6 +7,8 @@ Supports dbt-core 1.x (tested with 1.12); not dbt 2 / Fusion.
 
 - **Right-click models or folders** under `models/` → **dbt** → Run / Build / Test.
   Multi-select works; folders run everything inside (`--select path:models/staging`).
+- **Right-click seed CSVs** under `seeds/` (or its subfolders) → **dbt Seed** loads just those seeds
+  (`--select path:seeds/ref/countries.csv`). Multi-select works, and open seed CSVs get a ▶ seed button.
 - **Build + Upstream / + Downstream / + Upstream & Downstream** for a model (`+model`, `model+`, `+model+`).
 - **▶ in the editor title** builds the open model. Unsaved changes are saved first.
 - **Keyboard shortcuts** (while a model is open): `Ctrl+'` then

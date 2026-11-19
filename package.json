@@ -92,6 +92,12 @@
         "command": "dbtRunner.openSettings",
         "title": "Open Settings",
         "category": "dbt Runner"
+      },
+      {
+        "command": "dbtRunner.seedFiles",
+        "title": "dbt Seed",
+        "category": "dbt Runner",
+        "icon": "$(table)"
       }
     ],
     "submenus": [
@@ -106,6 +112,11 @@
           "submenu": "dbtRunner.submenu",
           "when": "(resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models([\\\\/]|$)/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i) || (explorerResourceIsFolder && resourcePath =~ /[\\\\/]models([\\\\/]|$)/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i)",
           "group": "navigation@90"
+        },
+        {
+          "command": "dbtRunner.seedFiles",
+          "when": "resourceExtname =~ /^\\.csv$/i && resourcePath =~ /[\\\\/]seeds[\\\\/]/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i",
+          "group": "navigation@91"
         }
       ],
       "editor/title/context": [
@@ -118,6 +129,11 @@
         {
           "command": "dbtRunner.build",
           "when": "resourceScheme == file && resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models([\\\\/]|$)/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i",
+          "group": "navigation@-10"
+        },
+        {
+          "command": "dbtRunner.seedFiles",
+          "when": "resourceScheme == file && resourceExtname =~ /^\\.csv$/i && resourcePath =~ /[\\\\/]seeds[\\\\/]/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i",
           "group": "navigation@-10"
         }
       ],
@@ -200,6 +216,10 @@
         {
           "command": "dbtRunner.menu",
           "when": "false"
+        },
+        {
+          "command": "dbtRunner.seedFiles",
+          "when": "editorIsOpen && resourceExtname =~ /^\\.csv$/i && resourcePath =~ /[\\\\/]seeds[\\\\/]/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
         }
       ]
     },

@@ -222,9 +222,28 @@ exports.run = async () => {
     assert.ok(d && same(d.file, file('models', 'b.sql')), JSON.stringify(d));
   });
 
+  await step('right-click seed: one CSV in a subfolder', async () => {
+    await run('seedFiles', 'seeds', 'ref', 'countries.csv');
+    assert.deepEqual(results(), ['seed.demo.countries']);
+  });
+
+  await step('right-click seed: several CSVs selected', async () => {
+    await vscode.commands.executeCommand('dbtRunner.seedFiles', uri('seeds', 's.csv'), [uri('seeds', 's.csv'), uri('seeds', 'ref', 'countries.csv')]);
+    assert.deepEqual(results(), ['seed.demo.countries', 'seed.demo.s']);
+  });
+
+  await step('seed menu shows for seed CSVs only', async () => {
+    const pkg = require(path.resolve(__dirname, '..', '..', 'package.json'));
+    const when = pkg.contributes.menus['explorer/context'].find(m => m.command === 'dbtRunner.seedFiles').when;
+    const [ext, inSeeds, excluded] = [...when.matchAll(/=~ \/(.+?)\/i/g)].map(m => new RegExp(m[1], 'i'));
+    const shows = p => ext.test(path.extname(p)) && inSeeds.test(p) && !excluded.test(p);
+    assert.ok(shows(file('seeds', 's.csv')) && shows(file('seeds', 'ref', 'countries.csv')));
+    assert.ok(!shows(file('models', 'data.csv')) && !shows(file('dbt_packages', 'x', 'seeds', 'a.csv')) && !shows(file('seeds', 'notes.txt')));
+  });
+
   await step('seed / deps / docs generate (static, not opened) / snapshot', async () => {
     await vscode.commands.executeCommand('dbtRunner.seed');
-    assert.deepEqual(results(), ['seed.demo.s']);
+    assert.deepEqual(results(), ['seed.demo.countries', 'seed.demo.s']);
     await vscode.commands.executeCommand('dbtRunner.deps');
     fs.rmSync(file('target', 'static_index.html'), { force: true });
     await vscode.commands.executeCommand('dbtRunner.docsGenerate'); // openDocsAfterGenerate=false in workspace settings

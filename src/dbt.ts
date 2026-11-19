@@ -1,6 +1,6 @@
 import * as path from 'path';
 
-export type DbtAction = 'run' | 'build' | 'test' | 'compile' | 'show';
+export type DbtAction = 'run' | 'build' | 'test' | 'compile' | 'show' | 'seed';
 
 function insideDbtPackages(dir: string): boolean {
   return dir.split(/[\\/]/).some(seg => seg.toLowerCase() === 'dbt_packages');

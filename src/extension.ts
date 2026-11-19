@@ -126,15 +126,25 @@ interface Selection {
   paths: string[];
 }
 
-async function resolveSelection(uri: vscode.Uri | undefined, uris: vscode.Uri[] | undefined, allowFolders: boolean): Promise<Selection | undefined> {
+async function resolveSelection(
+  uri: vscode.Uri | undefined,
+  uris: vscode.Uri[] | undefined,
+  allowFolders: boolean,
+  kind: 'model' | 'seed' = 'model'
+): Promise<Selection | undefined> {
   const picked = uris && uris.length ? uris : uri instanceof vscode.Uri ? [uri] : vscode.window.activeTextEditor ? [vscode.window.activeTextEditor.document.uri] : [];
+  const ext = kind === 'seed' ? /\.csv$/i : /\.sql$/i;
   const paths = picked
     .filter(u => u.scheme === 'file')
     .map(u => u.fsPath)
-    .filter(p => /\.sql$/i.test(p) || (allowFolders && isDir(p)));
+    .filter(p => ext.test(p) || (allowFolders && isDir(p)));
 
   if (paths.length === 0) {
-    void vscode.window.showErrorMessage(`dbt Runner: select one or more .sql models${allowFolders ? ' or model folders' : ''}.`);
+    void vscode.window.showErrorMessage(
+      kind === 'seed'
+        ? 'dbt Runner: select one or more seed .csv files.'
+        : `dbt Runner: select one or more .sql models${allowFolders ? ' or model folders' : ''}.`
+    );
     return undefined;
   }
   // A folder's project is found by walking up from inside it.
@@ -175,6 +185,25 @@ async function runDbt(action: DbtAction, graph: GraphScope, uri?: vscode.Uri, ur
     args,
     cwd: sel.root,
     title: `${action} ${sel.paths.map(p => withGraph(displayName(p), graph)).join(' ')}`,
+    diagnostics,
+    targetDir: targetDirOf(sel.root),
+    folder: workspaceFolderOf(sel.root)
+  });
+}
+
+/** `dbt seed --select path:seeds/<file>.csv ...` for the selected seed CSVs. */
+async function seedFiles(uri?: vscode.Uri, uris?: vscode.Uri[]): Promise<void> {
+  const sel = await resolveSelection(uri, uris, false, 'seed');
+  const exe = sel && (await requireExe());
+  if (!sel || !exe) {
+    return;
+  }
+  const selectors = sel.paths.map(p => modelSelector(sel.root, p));
+  await runDbtTask({
+    exe,
+    args: buildArgs('seed', selectors, cfg().get<string>('target', ''), cfg().get<string>('extraArgs', '')),
+    cwd: sel.root,
+    title: `seed ${sel.paths.map(p => path.basename(p, path.extname(p))).join(' ')}`,
     diagnostics,
     targetDir: targetDirOf(sel.root),
     folder: workspaceFolderOf(sel.root)
@@ -414,6 +443,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
     targetItem,
     diagnostics,
     vscode.commands.registerCommand('dbtRunner.compile', (uri?: vscode.Uri) => compileModel(uri)),
+    vscode.commands.registerCommand('dbtRunner.seedFiles', (uri?: vscode.Uri, uris?: vscode.Uri[]) => seedFiles(uri, uris)),
     vscode.commands.registerCommand('dbtRunner.preview', (uri?: vscode.Uri) => previewModel(uri)),
     vscode.commands.registerCommand('dbtRunner.deps', () => projectCommand(['deps'], 'deps')),
     vscode.commands.registerCommand('dbtRunner.seed', () => projectCommand(['seed'], 'seed')),
