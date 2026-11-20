@@ -12,6 +12,7 @@ import {
   flagArgs,
   groupByProject,
   modelName,
+  folderSelectors,
   modelSelector,
   withGraph
 } from './dbt';
@@ -196,7 +197,10 @@ async function resolveSelection(
   const probe = (p: string) => (isDir(p) ? path.join(p, '_') : p);
   const { projects, orphans } = groupByProject(paths.map(probe), exists, stopAt);
   if (orphans.length) {
-    void vscode.window.showErrorMessage(`dbt Runner: no dbt_project.yml found above ${orphans.map(o => path.basename(path.dirname(o)) + '/' + path.basename(o)).join(', ')}.`);
+    const shown = orphans.map(o => (path.basename(o) === '_' && isDir(path.dirname(o)) ? path.basename(path.dirname(o)) + '/' : path.basename(o)));
+    void vscode.window.showErrorMessage(
+      `dbt Runner: ${shown.join(', ')} is not inside a dbt project (no dbt_project.yml in it or above it). Right-click a folder inside your dbt project.`
+    );
     return undefined;
   }
   if (projects.size > 1) {
@@ -223,13 +227,14 @@ async function runDbt(action: DbtAction, graph: GraphScope, uri?: vscode.Uri, ur
   if (!sel || !exe) {
     return;
   }
-  const selectors = sel.paths.map(p => withGraph(modelSelector(sel.root, p), graph));
+  // Folders select everything inside them (subfolders included); the project folder itself = everything.
+  const selectors = graph === 'none' ? folderSelectors(sel.root, sel.paths) : sel.paths.map(p => withGraph(modelSelector(sel.root, p), graph));
   const args = buildArgs(action, selectors, cfg().get<string>('target', ''), cfg().get<string>('extraArgs', ''));
   await runDbtTask({
     exe,
     args,
     cwd: sel.root,
-    title: `${action} ${sel.paths.map(p => withGraph(displayName(p), graph)).join(' ')}`,
+    title: selectors.length ? `${action} ${sel.paths.map(p => withGraph(displayName(p), graph)).join(' ')}` : `${action} (whole project)`,
     diagnostics,
     targetDir: targetDirOf(sel.root),
     folder: workspaceFolderOf(sel.root)
@@ -395,17 +400,17 @@ async function writeModelYaml(root: string, modelFile: string, model: string, co
 
 /** `dbt seed --select path:seeds/<file>.csv ...` for the selected seed CSVs. */
 async function seedFiles(uri?: vscode.Uri, uris?: vscode.Uri[]): Promise<void> {
-  const sel = await resolveSelection(uri, uris, false, 'seed');
+  const sel = await resolveSelection(uri, uris, true, 'seed');
   const exe = sel && (await requireExe());
   if (!sel || !exe) {
     return;
   }
-  const selectors = sel.paths.map(p => modelSelector(sel.root, p));
+  const selectors = folderSelectors(sel.root, sel.paths);
   await runDbtTask({
     exe,
     args: buildArgs('seed', selectors, cfg().get<string>('target', ''), cfg().get<string>('extraArgs', '')),
     cwd: sel.root,
-    title: `seed ${sel.paths.map(p => path.basename(p, path.extname(p))).join(' ')}`,
+    title: selectors.length ? `seed ${sel.paths.map(p => (isDir(p) ? path.basename(p) + '/' : path.basename(p, path.extname(p)))).join(' ')}` : 'seed (whole project)',
     diagnostics,
     targetDir: targetDirOf(sel.root),
     folder: workspaceFolderOf(sel.root)

@@ -81,8 +81,19 @@ export function flagArgs(target: string, extraArgs: string): string[] {
   return [...(target.trim() ? ['--target', target.trim()] : []), ...splitArgs(extraArgs)];
 }
 
+/** No selectors = the whole project (no `--select`). */
 export function buildArgs(action: DbtAction, selectors: string[], target: string, extraArgs: string): string[] {
-  return [action, '--select', ...selectors, ...flagArgs(target, extraArgs)];
+  return [action, ...(selectors.length ? ['--select', ...selectors] : []), ...flagArgs(target, extraArgs)];
+}
+
+const samePath = (a: string, b: string) => path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
+
+/**
+ * `path:` selectors for files/folders in a project. Selecting the project folder itself means everything,
+ * which is no selector at all (dbt rejects `path:.`).
+ */
+export function folderSelectors(root: string, paths: string[]): string[] {
+  return paths.some(p => samePath(p, root)) ? [] : paths.map(p => modelSelector(root, p));
 }
 
 /** Locate dbt inside a venv: Windows layout first, then POSIX. */

@@ -7,6 +7,9 @@ Supports dbt-core 1.x (tested with 1.12); not dbt 2 / Fusion.
 
 - **Right-click models or folders** under `models/` → **dbt** → Run / Build / Test.
   Multi-select works; folders run everything inside (`--select path:models/staging`).
+- **Right-click any folder** in your dbt project → **dbt** → **Build** or **Seed** runs on everything inside it,
+  subfolders included (`--select path:seeds/ref`). Right-clicking the project folder itself builds / seeds the
+  whole project. Folders under `models/` also offer Run and Test.
 - **Right-click seed CSVs** under `seeds/` (or its subfolders) → **dbt Seed** loads just those seeds
   (`--select path:seeds/ref/countries.csv`). Multi-select works, and open seed CSVs get a ▶ seed button.
 - **Build + Upstream / + Downstream / + Upstream & Downstream** for a model (`+model`, `model+`, `+model+`).

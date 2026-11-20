@@ -163,7 +163,7 @@
       "explorer/context": [
         {
           "submenu": "dbtRunner.submenu",
-          "when": "(resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models([\\\\/]|$)/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i) || (explorerResourceIsFolder && resourcePath =~ /[\\\\/]models([\\\\/]|$)/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i)",
+          "when": "(resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models([\\\\/]|$)/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i) || (explorerResourceIsFolder && resourcePath not =~ /[\\\\/](dbt_packages|target|node_modules|logs|\\.git|\\.venv|venv|\\.vscode|__pycache__)([\\\\/]|$)/i)",
           "group": "navigation@90"
         },
         {
@@ -193,7 +193,8 @@
       "dbtRunner.submenu": [
         {
           "command": "dbtRunner.run",
-          "group": "dbt@1"
+          "group": "dbt@1",
+          "when": "!explorerResourceIsFolder || resourcePath =~ /[\\\\/]models([\\\\/]|$)/i"
         },
         {
           "command": "dbtRunner.build",
@@ -201,7 +202,13 @@
         },
         {
           "command": "dbtRunner.test",
-          "group": "dbt@3"
+          "group": "dbt@3",
+          "when": "!explorerResourceIsFolder || resourcePath =~ /[\\\\/]models([\\\\/]|$)/i"
+        },
+        {
+          "command": "dbtRunner.seedFiles",
+          "group": "dbt@4",
+          "when": "explorerResourceIsFolder"
         },
         {
           "command": "dbtRunner.buildUpstream",

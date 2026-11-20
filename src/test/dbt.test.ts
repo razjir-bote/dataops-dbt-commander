@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as path from 'path';
-import { buildArgs, dbtExecutable, findProjectRoot, groupByProject, modelName, modelSelector, parseDbtVersion, splitArgs, withGraph } from '../dbt';
+import { buildArgs, dbtExecutable, findProjectRoot, folderSelectors, groupByProject, modelName, modelSelector, parseDbtVersion, splitArgs, withGraph } from '../dbt';
 
 test('withGraph adds dbt graph operators', () => {
   assert.equal(withGraph('path:models/a.sql', 'none'), 'path:models/a.sql');
@@ -33,6 +33,18 @@ test('buildArgs includes select, target and split extra args', () => {
 
 test('buildArgs omits blank target and extra args', () => {
   assert.deepEqual(buildArgs('run', ['a'], '  ', '  '), ['run', '--select', 'a']);
+});
+
+test('buildArgs with no selectors runs the whole project (no dangling --select)', () => {
+  assert.deepEqual(buildArgs('build', [], 'dev', ''), ['build', '--target', 'dev']);
+  assert.deepEqual(buildArgs('seed', [], '', '--full-refresh'), ['seed', '--full-refresh']);
+});
+
+test('folderSelectors: the project root itself means "everything" (dbt rejects path:.)', () => {
+  const root = path.join('C:/p');
+  assert.deepEqual(folderSelectors(root, [path.join(root, 'seeds', 'ref')]), ['path:seeds/ref']);
+  assert.deepEqual(folderSelectors(root, [path.join(root, 'models'), root]), []);
+  assert.deepEqual(folderSelectors(root, [path.join('C:/P') + path.sep]), []);
 });
 
 test('dbtExecutable handles venv paths with spaces', () => {

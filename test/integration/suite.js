@@ -426,6 +426,41 @@ exports.run = async () => {
     assert.ok(!shows(file('models', 'data.csv')) && !shows(file('dbt_packages', 'x', 'seeds', 'a.csv')) && !shows(file('seeds', 'notes.txt')));
   });
 
+  await step('right-click any folder: build everything inside (subfolders included)', async () => {
+    await vscode.commands.executeCommand('dbtRunner.build', uri('seeds'), [uri('seeds')]);
+    assert.deepEqual(results(), ['seed.demo.countries', 'seed.demo.s']);
+  });
+
+  await step('right-click any folder: seed a subfolder', async () => {
+    await vscode.commands.executeCommand('dbtRunner.seedFiles', uri('seeds', 'ref'), [uri('seeds', 'ref')]);
+    assert.deepEqual(results(), ['seed.demo.countries']);
+  });
+
+  await step('right-click the project folder: build / seed the whole project', async () => {
+    await vscode.commands.executeCommand('dbtRunner.seedFiles', vscode.Uri.file(root), [vscode.Uri.file(root)]);
+    assert.deepEqual(results(), ['seed.demo.countries', 'seed.demo.s']);
+    await vscode.commands.executeCommand('dbtRunner.build', vscode.Uri.file(root), [vscode.Uri.file(root)]);
+    const r = results();
+    for (const id of ['model.demo.b', 'model.demo.c', 'model.demo.stg_a', 'seed.demo.s', 'seed.demo.countries']) {
+      assert.ok(r.includes(id), `${id} missing from ${r.join(',')}`);
+    }
+    assert.ok(r.some(x => x.startsWith('test.demo.not_null_b_id')));
+  });
+
+  await step('folder menu shows for project folders, not for target / dbt_packages / .git', async () => {
+    const pkg = require(path.resolve(__dirname, '..', '..', 'package.json'));
+    const when = pkg.contributes.menus['explorer/context'].find(m => m.submenu === 'dbtRunner.submenu').when;
+    const folderPart = when.split('||')[1];
+    const [excluded] = [...folderPart.matchAll(/=~ \/(.+?)\/i/g)].map(m => new RegExp(m[1], 'i'));
+    const shows = p => !excluded.test(p);
+    for (const ok of [root, file('seeds'), file('seeds', 'ref'), file('models', 'staging'), file('snapshots')]) {
+      assert.ok(shows(ok), ok);
+    }
+    for (const no of [file('target'), file('target', 'compiled'), file('dbt_packages', 'x'), file('.git'), file('logs')]) {
+      assert.ok(!shows(no), no);
+    }
+  });
+
   await step('seed / deps / docs generate (static, not opened) / snapshot', async () => {
     await vscode.commands.executeCommand('dbtRunner.seed');
     assert.deepEqual(results(), ['seed.demo.countries', 'seed.demo.s']);
