@@ -17,7 +17,7 @@ Supports dbt-core 1.x (tested with 1.12); not dbt 2 / Fusion.
 - **Build + Upstream / + Downstream / + Upstream & Downstream** for a model (`+model`, `model+`, `+model+`).
 - **▶ in the editor title** builds the open model. Unsaved changes are saved first.
 - **Keyboard shortcuts** (while a model is open): `Ctrl+'` then
-  `B` build · `R` run · `T` test · `C` compile · `P` preview.
+  `B` build · `R` run · `T` test · `C` compile · `P` preview · `Q` preview selection / CTE.
 - **dbt Compile** opens the compiled SQL beside the model.
 - **dbt Preview Data** runs `dbt show` and shows the rows in a table (limit: `dbtCommander.previewLimit`, default 100).
 - **Errors in the Problems panel**: compilation/runtime/database errors on the model (with the line when dbt
@@ -74,6 +74,18 @@ Supports dbt-core 1.x (tested with 1.12); not dbt 2 / Fusion.
   (generated on first use).
 - **Exposures and semantic models** in the sidebar and in Lineage.
 - **Check connection (dbt debug)** in the status bar menu.
+- **SQL scratchpad** — *New SQL Scratchpad* (status bar menu, sidebar title, command palette) opens an unsaved
+  `dbt-scratch-N.sql` for a project. **Ctrl+Enter** runs the query, or just the selection, through
+  `dbt show --inline`, so `ref()`, `source()`, macros and the active target work; rows open in the preview table.
+  Autocomplete and hovers work there too.
+- **Preview a selection or a CTE** — in a model, `Ctrl+'` then `Q` (or right-click → *dbt Preview Selection / CTE*)
+  previews the selected SQL; with no selection, the CTE under the cursor; elsewhere, the whole model. It uses the
+  editor's text, unsaved edits included, without saving the file.
+- **Add tests from YAML** — the lightbulb on a model column in YAML (`- name: id` under `columns:`) adds
+  `unique`, `not_null`, both, or `accepted_values` (asks for the values) to its `data_tests:` / `tests:` list.
+  On the first line of a model with no YAML entry, the lightbulb offers *Generate YAML for this model*.
+- **Hover on macros** — signature, description and documented arguments (from `macros:` YAML) of a macro call.
+- Saved last-run results of models / tests that no longer exist are dropped when the manifest changes.
 
 Go to definition and autocomplete read `target/manifest.json`, which dbt rewrites on every run, build, compile or
 parse — so they reflect your last dbt command. Without a manifest, `ref()` still jumps to a model file of that name.

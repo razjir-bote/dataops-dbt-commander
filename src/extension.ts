@@ -21,9 +21,9 @@ import {
 import { SettingsPanel, detectDbtVersion } from './settingsPanel';
 import { DbtDiagnostics, killTree, lastRunOptions, runDbtTask } from './runner';
 import { listTargets, parseProjectFile, profilesDirCandidates } from './profiles';
-import { compiledPath, parseShowOutput } from './show';
-import { PreviewPanel } from './previewPanel';
-import { LanguageDeps, clearManifestCache, loadManifest, registerLanguageFeatures } from './language';
+import { ShowResult, compiledPath } from './show';
+import { TestSpec } from './yamlfix';
+import { LanguageDeps, clearManifestCache, inProjectPaths, loadManifest, registerLanguageFeatures } from './language';
 import { Column, appendModel, hasModel, mergeColumns, newModelYaml, parseColumnsOutput, yamlUsable } from './yamlgen';
 import { cleanLine } from './errors';
 import { DbtItem, DbtSidebar } from './sidebar';
@@ -35,6 +35,7 @@ import { RunStatusStore } from './runstatus';
 import { DbtLastRun } from './lastrun';
 import { MIGRATED_KEYS, Scope, plannedMigrations } from './migrate';
 import { EditDeps, checkConnection, createStagingModel, newModel, openInDocs, renameModel } from './projectedits';
+import { DbtCodeActions, QueryDeps, addColumnTests, newScratchpad, previewSelection, runShow, trackScratchpads } from './query';
 
 let statusItem: vscode.StatusBarItem;
 let targetItem: vscode.StatusBarItem;
@@ -551,37 +552,36 @@ async function previewModel(uri?: vscode.Uri): Promise<void> {
     return;
   }
   const file = sel.paths[0];
-  const name = modelName(file);
-  const limit = Math.max(1, cfg().get<number>('previewLimit', 100));
-  const args = [
-    ...buildArgs('show', [modelSelector(sel.root, file)], cfg().get<string>('target', ''), cfg().get<string>('extraArgs', '')),
-    '--limit', String(limit), '--output', 'json', '--log-format', 'json'
-  ];
-
-  const run = async () => {
-    const seq = ++previewSeq;
-    const panel = PreviewPanel.loading(name, () => void run());
-    const started = Date.now();
-    const output = await vscode.window.withProgress(
-      { location: vscode.ProgressLocation.Notification, title: `dbt show ${name}`, cancellable: true },
-      (_progress, token) =>
-        new Promise<string>(resolve => {
-          const child = execFile(
-            exe,
-            args,
-            { cwd: sel.root, maxBuffer: 64 * 1024 * 1024, windowsHide: true, env: { ...process.env, PYTHONIOENCODING: 'utf-8' } },
-            (err, stdout, stderr) => resolve(`${stdout}\n${stderr}${err && !stdout && !stderr ? err.message : ''}`)
-          );
-          token.onCancellationRequested(() => killTree(child));
-        })
-    );
-    if (seq === previewSeq) {
-      panel.showResult(name, parseShowOutput(output), Date.now() - started, limit); // drop stale results
-    }
-  };
-  await run();
+  await runShow(exe, sel.root, modelName(file), ['--select', modelSelector(sel.root, file)], queryDeps);
 }
-let previewSeq = 0;
+
+let dbtVersion: string | undefined;
+
+const queryDeps: QueryDeps = {
+  requireExe,
+  pickProjectRoot: () => pickProjectRoot(true),
+  projectRootOf: file => languageDeps.projectRootOf(file),
+  isModelFile: file => inProjectPaths(languageDeps, file, ['model']),
+  showArgs: select => [...buildArgs('show', [], cfg().get<string>('target', ''), cfg().get<string>('extraArgs', '')), ...select],
+  previewLimit: () => Math.max(1, cfg().get<number>('previewLimit', 100)),
+  previewModel: uri => previewModel(uri),
+  dbtVersion: () => dbtVersion,
+  isProjectYaml: file => {
+    const root = languageDeps.projectRootOf(file);
+    if (!root) {
+      return false;
+    }
+    const rel = path.relative(root, file).split(path.sep).join('/').toLowerCase();
+    const p = pathsOf(root);
+    return ![p.target, p.packagesInstall].some(d => rel === d.toLowerCase() || rel.startsWith(d.toLowerCase() + '/'));
+  },
+  lacksYaml: async file => {
+    const root = languageDeps.projectRootOf(file);
+    const index = root ? await loadManifest(languageDeps, root) : undefined;
+    const model = index?.models.find(m => m.file.toLowerCase() === file.toLowerCase());
+    return !!model && !index!.patches.has(model.name);
+  }
+};
 
 /** Runs a project-level dbt command; resolves with the project root and exit code (undefined if it didn't run). */
 async function projectCommand(
@@ -650,6 +650,7 @@ async function showMenu(): Promise<void> {
   void refreshStatus(); // dbt may have been installed into the venv since the last check
   const items: (vscode.QuickPickItem & { command: string })[] = [
     { label: '$(debug-restart) Rerun last command', command: 'dbtCommander.rerunLast' },
+    { label: '$(notebook) New SQL scratchpad', description: 'run queries with ref() / source() through dbt show', command: 'dbtCommander.newScratchpad' },
     { label: '$(plug) Check connection (dbt debug)', command: 'dbtCommander.debug' },
     { label: '$(refresh) dbt retry', description: 'rerun only what failed last time', command: 'dbtCommander.retry' },
     { label: '$(package) dbt deps', command: 'dbtCommander.deps' },
@@ -689,6 +690,7 @@ async function refreshStatus(): Promise<void> {
   const seq = ++statusSeq;
   const venv = cfg().get<string>('venvPath', '');
   if (!venv.trim()) {
+    dbtVersion = undefined;
     statusItem.text = '$(gear) dbt: not configured';
     statusItem.tooltip = 'dbt Commander: set the dbt venv';
     statusItem.backgroundColor = undefined;
@@ -698,6 +700,7 @@ async function refreshStatus(): Promise<void> {
   if (seq !== statusSeq) {
     return; // a newer refresh superseded this one
   }
+  dbtVersion = info.error ? undefined : info.version;
   if (info.error) {
     statusItem.text = '$(error) dbt: not found';
     statusItem.tooltip = info.error;
@@ -809,6 +812,12 @@ export interface DbtRunnerApi {
     createStaging(target: unknown, relPath: string): Promise<string | undefined>;
     newModel(folder: unknown, name: string): Promise<string | undefined>;
   };
+  /** v0.10: scratchpads, previews of a selection / CTE (resolve with the rows), YAML test quick fixes. */
+  query: {
+    newScratchpad(root: string): Promise<vscode.TextEditor | undefined>;
+    previewSelection(editor: vscode.TextEditor): Promise<ShowResult | undefined>;
+    addColumnTests(uri: vscode.Uri, line: number, tests: TestSpec[]): Promise<boolean>;
+  };
 }
 
 /** Run dbt and capture its output (with a cancellable progress notification). */
@@ -883,6 +892,17 @@ export function activate(ctx: vscode.ExtensionContext): DbtRunnerApi {
     vscode.commands.registerCommand('dbtCommander.seedFiles', (uri?: vscode.Uri, uris?: vscode.Uri[]) => seedFiles(uri, uris)),
     vscode.commands.registerCommand('dbtCommander.generateYaml', (uri?: vscode.Uri) => generateYaml(uri)),
     vscode.commands.registerCommand('dbtCommander.preview', (uri?: vscode.Uri) => previewModel(uri)),
+    vscode.commands.registerCommand('dbtCommander.newScratchpad', () => newScratchpad(queryDeps)),
+    vscode.commands.registerCommand('dbtCommander.previewSelection', () => previewSelection(queryDeps)),
+    vscode.commands.registerCommand('dbtCommander.addColumnTests', (uri: vscode.Uri, line: number, tests: Parameters<typeof addColumnTests>[3]) =>
+      addColumnTests(queryDeps, uri, line, tests)
+    ),
+    vscode.languages.registerCodeActionsProvider(
+      [{ scheme: 'file', pattern: '**/*.{yml,yaml}' }, { scheme: 'file', pattern: '**/*.sql' }],
+      new DbtCodeActions(queryDeps),
+      { providedCodeActionKinds: DbtCodeActions.kinds }
+    ),
+    trackScratchpads(),
     vscode.commands.registerCommand('dbtCommander.deps', () => projectCommand(['deps'], 'deps')),
     vscode.commands.registerCommand('dbtCommander.seed', () => projectCommand(['seed'], 'seed')),
     vscode.commands.registerCommand('dbtCommander.snapshot', () => projectCommand(['snapshot'], 'snapshot')),
@@ -1055,6 +1075,11 @@ export function activate(ctx: vscode.ExtensionContext): DbtRunnerApi {
       rename: (target, name, preview) => renameModel(edits, target, name, preview),
       createStaging: (target, relPath) => createStagingModel(edits, target, relPath),
       newModel: (folder, name) => newModel(edits, folder, name)
+    },
+    query: {
+      newScratchpad: root => newScratchpad(queryDeps, root),
+      previewSelection: editor => previewSelection(queryDeps, editor),
+      addColumnTests: (uri, line, tests) => addColumnTests(queryDeps, uri, line, tests)
     }
   };
 }

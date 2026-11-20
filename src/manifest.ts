@@ -51,6 +51,9 @@ export interface MacroEntry {
   file?: string;
   /** dbt's own (`dbt`) or the adapter's macros: callable without a package prefix, like the project's. */
   internal?: boolean;
+  /** From YAML `macros:` properties. */
+  description?: string;
+  arguments?: { name: string; type?: string; description?: string }[];
 }
 
 /** A seed, snapshot or test in the root project. */
@@ -222,7 +225,19 @@ export function parseManifest(
         mc.package_name === 'dbt' ||
         mc.package_name === `dbt_${m.metadata?.adapter_type}` ||
         (!!dbtIncludeDir && !!file && file.startsWith(dbtIncludeDir) && exists(file));
-      macros.push({ name: mc.name, package: mc.package_name, file, ...(internal ? { internal } : {}) });
+      const args = Array.isArray(mc.arguments)
+        ? mc.arguments
+            .filter((a: any) => text(a?.name))
+            .map((a: any) => ({ name: String(a.name), ...(text(a.type) ? { type: a.type } : {}), ...(text(a.description) ? { description: a.description } : {}) }))
+        : [];
+      macros.push({
+        name: mc.name,
+        package: mc.package_name,
+        file,
+        ...(internal ? { internal } : {}),
+        ...(text(mc.description) ? { description: mc.description } : {}),
+        ...(args.length ? { arguments: args } : {})
+      });
     }
   }
 

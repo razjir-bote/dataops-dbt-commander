@@ -2,7 +2,7 @@
   "name": "dataops-dbt-commander",
   "displayName": "DataOps dbt Commander",
   "description": "Run, build, test, compile and preview dbt models from the VS Code Explorer and editor with dbt-core 1.x from a configured venv.",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "publisher": "local",
   "license": "MIT",
   "engines": {
@@ -223,6 +223,22 @@
         "title": "Check connection (dbt debug)",
         "category": "dbt Commander",
         "icon": "$(plug)"
+      },
+      {
+        "command": "dbtCommander.newScratchpad",
+        "title": "New SQL Scratchpad",
+        "category": "dbt Commander",
+        "icon": "$(notebook)"
+      },
+      {
+        "command": "dbtCommander.previewSelection",
+        "title": "dbt Preview Selection / CTE",
+        "category": "dbt Commander"
+      },
+      {
+        "command": "dbtCommander.addColumnTests",
+        "title": "Add column tests",
+        "category": "dbt Commander"
       }
     ],
     "submenus": [
@@ -445,6 +461,14 @@
         {
           "command": "dbtCommander.newModel",
           "when": "false"
+        },
+        {
+          "command": "dbtCommander.addColumnTests",
+          "when": "false"
+        },
+        {
+          "command": "dbtCommander.previewSelection",
+          "when": "editorIsOpen && (dbtCommander.isScratchpad || resourceExtname =~ /^\\.sql$/i && (resourcePath =~ /[\\\\/]models([\\\\/]|$)/i || resourcePath in dbtCommander.modelPaths) && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i)"
         }
       ],
       "view/title": [
@@ -472,6 +496,11 @@
           "command": "dbtCommander.rerunLast",
           "when": "view == dbtCommander.lastRun",
           "group": "navigation@2"
+        },
+        {
+          "command": "dbtCommander.newScratchpad",
+          "when": "view == dbtCommander.project",
+          "group": "navigation@3"
         }
       ],
       "view/item/context": [
@@ -615,6 +644,13 @@
           "when": "view == dbtCommander.lineage && viewItem =~ /^lineage-source/",
           "group": "docs@2"
         }
+      ],
+      "editor/context": [
+        {
+          "command": "dbtCommander.previewSelection",
+          "when": "dbtCommander.isScratchpad || (resourceScheme == file && resourceExtname =~ /^\\.sql$/i && (resourcePath =~ /[\\\\/]models([\\\\/]|$)/i || resourcePath in dbtCommander.modelPaths) && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i)",
+          "group": "dbt@1"
+        }
       ]
     },
     "configuration": {
@@ -716,6 +752,24 @@
         "command": "dbtCommander.rerunLast",
         "key": "ctrl+' l",
         "mac": "cmd+' l"
+      },
+      {
+        "command": "dbtCommander.previewSelection",
+        "key": "ctrl+enter",
+        "mac": "cmd+enter",
+        "when": "editorTextFocus && dbtCommander.isScratchpad"
+      },
+      {
+        "command": "dbtCommander.previewSelection",
+        "key": "ctrl+' q",
+        "mac": "cmd+' q",
+        "when": "resourceScheme == file && editorTextFocus && resourceExtname =~ /^\\.sql$/i && (resourcePath =~ /[\\\\/]models([\\\\/]|$)/i || resourcePath in dbtCommander.modelPaths) && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
+      },
+      {
+        "command": "dbtCommander.previewSelection",
+        "key": "ctrl+' q",
+        "mac": "cmd+' q",
+        "when": "editorTextFocus && dbtCommander.isScratchpad"
       }
     ],
     "viewsContainers": {

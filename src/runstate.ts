@@ -121,3 +121,18 @@ export function slowest(runResultsJson: string): { uniqueId: string; status: str
     }))
     .sort((a: { seconds: number }, b: { seconds: number }) => b.seconds - a.seconds);
 }
+
+/** The state without nodes that are no longer in the project (the same object when nothing was dropped). */
+export function pruneRunState(state: Record<string, NodeRun>, liveIds: Set<string>): Record<string, NodeRun> {
+  const keep = Object.entries(state).filter(([id]) => liveIds.has(id));
+  return keep.length === Object.keys(state).length ? state : Object.fromEntries(keep);
+}
+
+/** unique_ids a run_results.json can mention (nodes, sources, unit tests, functions, …); undefined if the manifest is unusable. */
+export function liveNodeIds(manifestJson: string): Set<string> | undefined {
+  const m = parse(manifestJson);
+  if (!m || typeof m.nodes !== 'object' || !m.nodes || !Object.keys(m.nodes).length) {
+    return undefined;
+  }
+  return new Set(['nodes', 'sources', 'unit_tests', 'functions', 'saved_queries', 'exposures', 'semantic_models'].flatMap(k => Object.keys(m[k] ?? {})));
+}

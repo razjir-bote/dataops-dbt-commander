@@ -308,6 +308,7 @@ export function registerLanguageFeatures(ctx: vscode.ExtensionContext, deps: Lan
     { scheme: 'file', pattern: '**/*.sql' }
   ];
   const lenses = new DbtCodeLensProvider(deps, status);
+  const scratch: vscode.DocumentFilter[] = [{ scheme: 'untitled', language: 'sql' }, { scheme: 'untitled', language: 'jinja-sql' }];
   ctx.subscriptions.push(
     vscode.languages.registerDefinitionProvider(selector, {
       provideDefinition: (doc, pos) =>
@@ -315,9 +316,10 @@ export function registerLanguageFeatures(ctx: vscode.ExtensionContext, deps: Lan
           ? new DbtDefinitionProvider(deps).provideDefinition(doc, pos)
           : undefined
     }),
-    vscode.languages.registerCompletionItemProvider(selector, new DbtCompletionProvider(deps), "'", '"', '.'),
+    // Scratchpads (untitled dbt-scratch-N.sql) get completion and hovers too.
+    vscode.languages.registerCompletionItemProvider([...selector, ...scratch], new DbtCompletionProvider(deps), "'", '"', '.'),
     vscode.languages.registerCodeLensProvider(selector, lenses),
-    vscode.languages.registerHoverProvider(selector, new DbtHoverProvider(deps)),
+    vscode.languages.registerHoverProvider([...selector, ...scratch], new DbtHoverProvider(deps)),
     vscode.languages.registerReferenceProvider(selector, new DbtReferenceProvider(deps)),
     vscode.workspace.onDidChangeConfiguration(e => e.affectsConfiguration('dbtCommander.codeLens') && lenses.refresh())
   );

@@ -177,7 +177,9 @@ exports.run = async () => {
     const text = vscode.window.activeTextEditor.document.getText();
     assert.ok(text.length > 10000, 'default keybindings not loaded');
     const keys = [...text.matchAll(/"key":\s*"([^"]+)",\s*"command":\s*"([^"]+)"/g)].filter(m => !m[2].startsWith('dbtCommander.')).map(m => m[1]);
-    const ours = require(path.resolve(__dirname, '..', '..', 'package.json')).contributes.keybindings.map(k => k.key);
+    const ours = require(path.resolve(__dirname, '..', '..', 'package.json'))
+      .contributes.keybindings.filter(k => !/dbtCommander\.isScratchpad/.test(k.when || '') || k.key.startsWith("ctrl+'"))
+      .map(k => k.key);
     const clash = ours.filter(k => keys.includes(k) || keys.includes(k.split(' ')[0]));
     assert.deepEqual(clash, []);
     await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
@@ -840,6 +842,134 @@ exports.run = async () => {
     await vscode.commands.executeCommand('dbtCommander.docsGenerate'); // openDocsAfterGenerate=false in workspace settings
     assert.ok(fs.existsSync(file('target', 'static_index.html')), 'static_index.html not generated');
     await vscode.commands.executeCommand('dbtCommander.snapshot');
+  });
+
+  // ----- v0.10: macro hover, scratchpad, selection / CTE preview, YAML quick fixes, run-state pruning -----
+  // At the end of the suite: these add a temporary model, and dbt show re-parses the project.
+
+  const closeAll = () => vscode.commands.executeCommand('workbench.action.closeAllEditors');
+  const actionsAt = async (u, line) =>
+    (await vscode.commands.executeCommand('vscode.executeCodeActionProvider', u, new vscode.Range(line, 0, line, 0))) || [];
+
+  await step('hover on a macro: signature, description and arguments', async () => {
+    const text = await hoverText(['analyses', 'uses_macro.sql'], 'cents_to_dollars');
+    assert.match(text, /cents_to_dollars\(col\)/);
+    assert.match(text, /Converts cents to dollars/);
+    assert.match(text, /\x60col\x60 \(string\): The column in cents/);
+    assert.match(text, /demo · macros\/money\.sql/);
+  });
+
+  await step('scratchpad: runs the query, or the selection, through dbt show --inline', async () => {
+    const ed = await api.query.newScratchpad(root);
+    try {
+      assert.ok(ed.document.isUntitled);
+      assert.match(path.basename(ed.document.uri.fsPath), /^dbt-scratch-\d+\.sql$/);
+      const sql = "-- counts\nselect count(*) as \"row count\", 'it''s' as q\nfrom {{ ref('b') }}\n-- trailing comment\n";
+      await ed.edit(e => e.replace(new vscode.Range(0, 0, ed.document.lineCount, 0), sql));
+      let r = await api.query.previewSelection(ed);
+      assert.ok(r && r.rows, JSON.stringify(r));
+      assert.deepEqual(Object.keys(r.rows[0]), ['row count', 'q']);
+      assert.equal(r.rows[0].q, "it's");
+      await ed.edit(e => e.replace(new vscode.Range(0, 0, ed.document.lineCount, 0), 'select nope from\n\nselect 42 as answer;'));
+      ed.selection = new vscode.Selection(2, 0, 2, 20);
+      r = await api.query.previewSelection(ed);
+      assert.deepEqual(r && r.rows, [{ answer: 42 }], JSON.stringify(r));
+      ed.selection = new vscode.Selection(0, 0, 0, 0);
+      r = await api.query.previewSelection(ed);
+      assert.ok(r && r.error && !r.rows, JSON.stringify(r));
+    } finally {
+      await vscode.commands.executeCommand('workbench.action.revertAndCloseActiveEditor');
+    }
+  });
+
+  await step('model: preview the CTE under the cursor (with the CTEs before it), or the selection', async () => {
+    const f = file('models', 'zz_ctes.sql');
+    fs.writeFileSync(f, 'with one as (\n  select 1 as n\n),\ntwo as (\n  select n + 1 as n from one\n)\nselect n * 10 as n from two\n');
+    try {
+      const doc = await vscode.workspace.openTextDocument(f);
+      const ed = await vscode.window.showTextDocument(doc);
+      const at = needle => {
+        const p = doc.positionAt(doc.getText().indexOf(needle));
+        ed.selection = new vscode.Selection(p, p);
+      };
+      at('n + 1');
+      assert.deepEqual((await api.query.previewSelection(ed)).rows, [{ n: 2 }]);
+      at('select 1');
+      assert.deepEqual((await api.query.previewSelection(ed)).rows, [{ n: 1 }]);
+      const off = doc.getText().indexOf('select n + 1 as n from one');
+      ed.selection = new vscode.Selection(doc.positionAt(off), doc.positionAt(off + 10)); // "select n +" is not valid alone
+      const bad = await api.query.previewSelection(ed);
+      assert.ok(bad && bad.error, JSON.stringify(bad));
+      // Cursor outside any CTE with unsaved edits: previews the editor's text and leaves the file unsaved.
+      const fin = doc.getText().indexOf('n * 10');
+      await ed.edit(e => e.replace(new vscode.Range(doc.positionAt(fin), doc.positionAt(fin + 6)), 'n * 100'));
+      at('n * 100');
+      assert.deepEqual((await api.query.previewSelection(ed)).rows, [{ n: 200 }]);
+      assert.ok(doc.isDirty, 'the model was saved');
+      assert.ok(fs.readFileSync(f, 'utf8').includes('n * 10 as'), 'file on disk changed');
+    } finally {
+      await vscode.commands.executeCommand('workbench.action.revertAndCloseActiveEditor');
+      await closeAll();
+      fs.rmSync(f, { force: true });
+    }
+  });
+
+  await step('quick fixes: Generate YAML on a model without YAML; add tests to a YAML column', async () => {
+    const model = file('models', 'zz_noyaml.sql');
+    fs.writeFileSync(model, 'select 1 as id\n');
+    const f = file('models', 'schema.yml');
+    const original = fs.readFileSync(f, 'utf8');
+    try {
+      await vscode.commands.executeCommand('dbtCommander.parse');
+      const m = await vscode.workspace.openTextDocument(model);
+      assert.ok((await actionsAt(m.uri, 0)).some(a => a.title === 'Generate YAML for this model'), 'no Generate YAML action on zz_noyaml');
+      const b = await vscode.workspace.openTextDocument(uri('models', 'b.sql'));
+      assert.ok(!(await actionsAt(b.uri, 0)).some(a => a.title === 'Generate YAML for this model'), 'Generate YAML offered for b, which has YAML');
+
+      fs.writeFileSync(f, original.replace(/\s*$/, '\n') + '  - name: zz_noyaml\n    columns:\n      - name: id\n        description: the id\n');
+      const doc = await vscode.workspace.openTextDocument(f);
+      const lines = doc.getText().split(/\r?\n/);
+      const flowLine = lines.findIndex(l => /data_tests: \[not_null\]/.test(l));
+      assert.ok(!(await actionsAt(doc.uri, flowLine)).some(a => /^Add /.test(a.title)), 'offered to edit a flow-style list');
+      const line = lines.lastIndexOf('      - name: id');
+      const titles = (await actionsAt(doc.uri, line)).map(a => a.title);
+      for (const t of ['Add unique + not_null tests to id', 'Add not_null test to id', 'Add unique test to id', 'Add accepted_values test to id…']) {
+        assert.ok(titles.includes(t), t + ' missing from ' + titles.join(', '));
+      }
+      const both = (await actionsAt(doc.uri, line)).find(a => a.title === 'Add unique + not_null tests to id');
+      assert.ok(await vscode.workspace.applyEdit(both.edit));
+      assert.ok(await api.query.addColumnTests(doc.uri, line, [{ accepted_values: ['x', 'y'] }]));
+      assert.match(doc.getText(), /      - name: id\r?\n        description: the id\r?\n        data_tests:\r?\n          - unique\r?\n          - not_null\r?\n          - accepted_values:\r?\n              arguments:\r?\n                values: \["x", "y"\]/);
+      // The same accepted_values / unique / not_null aren't offered twice.
+      assert.ok(!(await actionsAt(doc.uri, line)).some(a => /^Add (unique|not_null)/.test(a.title)));
+      // dbt accepts the YAML: unique + not_null pass on zz_noyaml.id.
+      await doc.save();
+      await vscode.commands.executeCommand('dbtCommander.build', vscode.Uri.file(model), [vscode.Uri.file(model)]);
+      const r = results();
+      assert.ok(r.some(x => x.startsWith('test.demo.unique_zz_noyaml_id')) && r.some(x => x.startsWith('test.demo.not_null_zz_noyaml_id')), r.join(','));
+    } finally {
+      await closeAll();
+      fs.writeFileSync(f, original);
+      fs.rmSync(model, { force: true });
+    }
+  });
+
+  await step('run state: results of nodes no longer in the project are pruned', async () => {
+    const fake = file('target', 'zz_fake_results.json');
+    const rr = JSON.parse(fs.readFileSync(file('target', 'run_results.json'), 'utf8'));
+    rr.metadata.generated_at = new Date().toISOString();
+    rr.args.which = 'build';
+    rr.results = [{ unique_id: 'model.demo.zz_gone', status: 'success', execution_time: 1 }];
+    fs.writeFileSync(fake, JSON.stringify(rr));
+    try {
+      await api.runStatus.ingest(fake, false);
+      assert.ok(api.runStatus.result(root, 'model.demo.zz_gone'), 'fake result not ingested');
+      await api.runStatus.prune(root);
+      assert.equal(api.runStatus.result(root, 'model.demo.zz_gone'), undefined);
+      assert.ok(api.runStatus.result(root, 'model.demo.b'), 'a live node was pruned');
+    } finally {
+      fs.rmSync(fake, { force: true });
+    }
   });
 
   fs.writeFileSync(process.env.ITEST_OUT, out.join('\n'));

@@ -1,7 +1,7 @@
 # DataOps dbt Commander — developer handover
 
 Keep this file current: update it in the same commit as any change to features, architecture, build/release
-process, or known issues. Last updated: 2026-11-21 (v0.9.0 released from the new repo).
+process, or known issues. Last updated: 2026-11-21 (v0.10.0 released).
 
 ## What this is
 A VS Code extension (TypeScript) for working with **dbt-core 1.x** (tested with 1.12.7) on **Windows**, running
@@ -14,6 +14,18 @@ Since v0.9.0 the extension ID is `local.dataops-dbt-commander` and every command
 is `dbtCommander.*`; `migrate.ts` copies old `dbtRunner.*` user and workspace settings once on activation.
 
 ## Status
+- **v0.10.0 — released** (https://github.com/razjir-bote/dataops-dbt-commander/releases/tag/v0.10.0): SQL scratchpad (`query.ts`: untitled
+  `dbt-scratch-N.sql` in the project folder, recognised by name so it survives hot exit; context key
+  `dbtCommander.isScratchpad` scopes Ctrl+Enter), preview selection / CTE (`dbtCommander.previewSelection`,
+  `Ctrl+'` `Q`; pure CTE parser `scratch.ts`; runs `dbt show --inline` with config() blocks and a trailing `;`
+  stripped), YAML quick fixes (`DbtCodeActions`; pure `yamlfix.ts` text insertions; `accepted_values` values go
+  under `arguments:` for dbt ≥ 1.10, top level before), macro hover (`macrohover.ts`; manifest macros carry
+  description / arguments), run-state pruning (`RunStatusStore.prune` on manifest change + at activation; pure
+  `pruneRunState` / `liveNodeIds`). Design: `docs/superpowers/specs/2026-11-21-dbt-commander-v0.10-design.md`.
+  The CTE parser reads standard SQL first, then retries with backslash escapes and `#` comments and keeps the
+  reading that finds the most CTEs (so `'C:\'` in standard SQL and `'O\'Brien'` in Snowflake both work). Preview
+  selection never saves: an unsaved model with the cursor outside any CTE previews the editor text inline
+  (`dbtCommander.preview` itself still saves first, like the run commands).
 - **v0.9.0 — released** from the new repo (https://github.com/razjir-bote/dataops-dbt-commander/releases/tag/v0.9.0)
   and installed locally as `local.dataops-dbt-commander@0.9.0` (old `local.dbt-runner` uninstalled): the rename to DataOps dbt Commander (`dbtCommander.*` IDs,
   settings migration) plus everything from v0.7 and v0.8, and a fix found by CI: rename refused to rename back
@@ -36,8 +48,8 @@ is `dbtCommander.*`; `migrate.ts` copies old `dbtRunner.*` user and workspace se
   the review fixes; the review fixes were checked with typecheck + unit tests (98) only.
 - Not done from the v0.8 review (minor): renaming Python models / flow-style YAML, renaming per-model config in
   dbt_project.yml (the rename message points this out), semantic models open at line 0 in Lineage.
-- Deferred from the v0.7 review: pruning the persisted run state (`dbtCommander.runState` grows with renamed /
-  deleted nodes); `Ctrl+'` `L` doesn't reach VS Code while the terminal has focus.
+- Deferred from the v0.7 review: `Ctrl+'` `L` doesn't reach VS Code while the terminal has focus. (Run-state
+  pruning was done in v0.10.)
 
 ## Build, test, release
 ```bash
@@ -50,8 +62,9 @@ npm run package              # esbuild → dist/extension.js, then vsce → .vsi
 - **Integration suite** (`test/integration/run.js` + `suite.js`): copies `test/fixtures/demo` to
   `.vscode-test/work/demo`, creates `.vscode-test/dbt-venv` (dbt-core~=1.12.0 + dbt-duckdb) on first run
   (`DBT_PYTHON` picks the Python; default `py -3.12` on Windows), launches VS Code with the extension and prints
-  `PASS`/`FAIL` lines; exits 1 on any FAIL. ~3–4 min. Currently 44 checks. The suite talks to the extension
-  through the API returned by `activate()` (`{ sidebar, tests, lineage }`).
+  `PASS`/`FAIL` lines; exits 1 on any FAIL. ~4–5 min. Currently 61 checks; the v0.10 ones are last because they add a
+  temporary model and feed a fake run_results file to the run-state store (which then is "the last run"). The suite talks to the extension
+  through the API returned by `activate()` (`sidebar`, `tests`, `lineage`, `runStatus`, `projectEdits`, `query`, …).
 - **CI** (`.github/workflows/ci.yml`): windows-latest, Node 22, Python 3.12; typecheck, unit, integration,
   package. A pushed tag `vX.Y.Z` that equals `package.json` version publishes a GitHub release with the vsix.
 - **Release steps:** bump `version` in package.json (+ `npm install` to refresh the lockfile), commit, push
@@ -86,6 +99,8 @@ npm run package              # esbuild → dist/extension.js, then vsce → .vsi
 | `lineage.ts` | Lineage tree view (follows editor, pinnable) |
 | `testing.ts` | Testing panel controller; runs `dbt test`, maps run_results; snapshot-based runs |
 | `settingsPanel.ts` | settings webview (venv, target, extra flags) |
+| `query.ts` | `runShow` (shared by Preview Data), scratchpads, preview selection / CTE, YAML quick-fix code actions |
+| `scratch.ts` / `yamlfix.ts` / `macrohover.ts` | pure: CTE parser + inline SQL / column test insertions / macro signature + hover text |
 
 Design docs per version: `docs/superpowers/specs/`, plans: `docs/superpowers/plans/`.
 
@@ -96,7 +111,8 @@ Design docs per version: `docs/superpowers/specs/`, plans: `docs/superpowers/pla
 - **dbt 1.12 specifics:** `path:.` is rejected (project root = no selector); test failures print as
   `[ERROR]: in test x (path)` / `[WARNING]: …`; `dbt retry` keeps `args.which` of the original command;
   `dbt show --output json --log-format json` puts rows in the `ShowNode` event's `data.preview`;
-  `docs generate --static` writes `target/static_index.html`.
+  `docs generate --static` writes `target/static_index.html`. `dbt show --inline` puts errors in a level-"error"
+  event's `data.exc`; generic test args belong under `arguments:` since 1.10 (older versions reject the key).
 - **run_results.json is shared:** only trust it when `metadata.invocation_id` changed since the run started
   (and `args.which` matches when it matters). A manifest rewrite mid-run triggers tree refreshes — snapshot
   data at run start.
@@ -123,4 +139,4 @@ Design docs per version: `docs/superpowers/specs/`, plans: `docs/superpowers/pla
 - Paths in dbt_project.yml written with Jinja fall back to dbt's defaults.
 - Generate YAML doesn't handle versioned/ephemeral models.
 - Ideas not yet picked: full-refresh build, run/test upstream/downstream, state:modified + defer, run on save,
-  source freshness, dbt unit tests in the Testing panel, selected-SQL preview, dbt debug, Marketplace publish.
+  source freshness, dbt unit tests in the Testing panel, query history / CSV export for the preview, Marketplace publish.
