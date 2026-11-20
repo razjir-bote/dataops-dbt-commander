@@ -1,3 +1,5 @@
+import { rootKey } from './runstate';
+
 export interface DbtProblem {
   relPath: string;
   /** 0-based line number. */
@@ -6,6 +8,55 @@ export interface DbtProblem {
   severity: 'error' | 'warning';
   /** dbt node name (model / test / seed name) the problem belongs to. */
   node: string;
+}
+
+/** Name and package of each node dbt executed, from target/run_results.json (`model.<package>.<name>[.v2]`). */
+export function executedNodes(runResultsJson: string): { name: string; package: string }[] {
+  try {
+    const results = JSON.parse(runResultsJson)?.results;
+    return Array.isArray(results)
+      ? results
+          .map((r: any) => String(r?.unique_id ?? '').split('.'))
+          .filter((p: string[]) => p.length >= 3 && p[1] && p[2])
+          .map((p: string[]) => ({ name: p[2], package: p[1] }))
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Problems per dbt node, per project (two projects can both have a model `stg_orders`): re-running a node
+ * replaces its problems and leaves every other node's alone.
+ */
+export class ProblemStore<T> {
+  private readonly byNode = new Map<string, { file: string; item: T }[]>();
+
+  /** `executed`: nodes that ran in `root` (their old problems go); `fresh`: the problems reported now. */
+  update(root: string, executed: string[], fresh: { node: string; file: string; item: T }[]): void {
+    const key = (node: string) => `${rootKey(root)}\u0000${node}`;
+    for (const n of executed) {
+      this.byNode.delete(key(n));
+    }
+    const grouped = new Map<string, { file: string; item: T }[]>();
+    for (const f of fresh) {
+      grouped.set(key(f.node), [...(grouped.get(key(f.node)) ?? []), { file: f.file, item: f.item }]);
+    }
+    for (const [k, v] of grouped) {
+      this.byNode.set(k, v);
+    }
+  }
+
+  /** Every current problem, by file. */
+  byFile(): Map<string, T[]> {
+    const out = new Map<string, T[]>();
+    for (const entries of this.byNode.values()) {
+      for (const { file, item } of entries) {
+        out.set(file, [...(out.get(file) ?? []), item]);
+      }
+    }
+    return out;
+  }
 }
 
 /** Names of the nodes dbt executed, from target/run_results.json. */

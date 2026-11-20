@@ -4,7 +4,6 @@ import * as path from 'path';
 import { spawn } from 'child_process';
 import { LanguageDeps, loadManifest } from './language';
 import { NodeEntry } from './manifest';
-import { executedNodeNames } from './errors';
 import { DbtDiagnostics, killTree } from './runner';
 import { RunResult, acceptResults, batchSelectors, invocationOf, testLine } from './runresults';
 import { modelSelector } from './dbt';
@@ -179,10 +178,10 @@ export class DbtTests implements vscode.Disposable {
           const json = readIfExists(rrFile);
           // Only results this very invocation wrote — not a concurrent terminal run's or an older file.
           const accepted = json ? acceptResults(json, previous, started) : undefined;
-          this.deps.diagnostics.update(output, root, accepted && json ? executedNodeNames(json) : []);
+          this.deps.diagnostics.update(output, root, accepted ? json : undefined);
           accepted?.forEach(r => byId.set(r.uniqueId, r));
           if (code !== 0) {
-            failedCode = code;
+            failedCode = code ?? -1; // no exit code: dbt didn't start (the tests are errored, not skipped)
             tail = output.replace(/\x1b\[[0-9;]*m/g, '').trim().split(/\r?\n/).slice(-12).join('\n');
           }
         }

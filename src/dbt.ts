@@ -57,9 +57,13 @@ export function modelName(filePath: string): string {
   return path.basename(filePath).replace(/\.sql$/i, '');
 }
 
-/** Unambiguous dbt selector for one model file: `path:<relative path>` with forward slashes. */
+/**
+ * dbt selector for a file or folder: `path:<relative path>` with forward slashes. dbt splits selectors on spaces
+ * and matches `path:` as a glob, so a space becomes `?` and glob characters are bracketed (`[` → `[[]`).
+ */
 export function modelSelector(projectRoot: string, filePath: string): string {
-  return 'path:' + path.relative(projectRoot, filePath).split(path.sep).join('/');
+  const rel = path.relative(projectRoot, filePath).split(path.sep).join('/');
+  return 'path:' + rel.replace(/[\s[\]*?]/g, c => (/\s/.test(c) ? '?' : `[${c}]`));
 }
 
 export type GraphScope = 'none' | 'upstream' | 'downstream' | 'both';

@@ -9,7 +9,7 @@ import { ColumnOwner, isMinMaxError, profileRows, profileSql, relationSql, yamlC
 import { columnRef } from './scaffold';
 import { scalar } from './yamlgen';
 import { killTree } from './runner';
-import { TestSpec, addTestsEdit, columnAt, columnOwnerAt, legacyTestArguments } from './yamlfix';
+import { TestSpec, addTestsEdit, columnAt, columnOwnerAt, legacyTestArguments, parseValueList } from './yamlfix';
 
 export interface QueryDeps {
   requireExe(): Promise<string | undefined>;
@@ -317,14 +317,14 @@ export async function addColumnTests(deps: QueryDeps, uri: vscode.Uri, line: num
     const col = columnAt(doc.getText(), line);
     const input = await vscode.window.showInputBox({
       title: `accepted_values for ${col?.model}.${col?.column}`,
-      prompt: 'Accepted values, separated by commas',
-      placeHolder: 'placed, shipped, completed',
-      validateInput: v => (v.split(',').some(x => x.trim()) ? undefined : 'Enter at least one value')
+      prompt: 'Accepted values, separated by commas. Put a value in quotes to keep commas or spaces in it.',
+      placeHolder: 'placed, shipped, "returned, partially"',
+      validateInput: v => (parseValueList(v).length ? undefined : 'Enter at least one value')
     });
     if (!input) {
       return false;
     }
-    specs = [{ accepted_values: input.split(',').map(v => v.trim()).filter(Boolean) }];
+    specs = [{ accepted_values: parseValueList(input) }];
   } else {
     specs = tests;
   }

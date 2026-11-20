@@ -21,7 +21,8 @@ Supports dbt-core 1.x (tested with 1.12); not dbt 2 / Fusion.
 - **dbt Compile** opens the compiled SQL beside the model.
 - **dbt Preview Data** runs `dbt show` and shows the rows in a table (limit: `dbtCommander.previewLimit`, default 100).
   Click a header to sort, type in the filter box to narrow the rows, then **Copy** (tab-separated, pastes into
-  Excel / Sheets) or **Save CSV…** — both take the rows as shown. **Σ** on a header profiles that column.
+  Excel / Sheets) or **Save CSV…** — both take the rows as shown (text that a spreadsheet would run as a formula,
+  like `=…`, is exported with a leading `'`). **Σ** on a header profiles that column.
 - **Errors in the Problems panel**: compilation/runtime/database errors on the model (with the line when dbt
   gives one), test failures and warnings on the YAML file. A model's problems are replaced when it runs again.
 - **Target switcher** in the status bar, listing the targets from your `profiles.yml`.

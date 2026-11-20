@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { spawn, execFile, ChildProcess } from 'child_process';
-import { executedNodeNames, parseDbtErrors } from './errors';
+import { ProblemStore, executedNodes, parseDbtErrors } from './errors';
 import { invocationOf } from './runresults';
 import { runSummary } from './runstate';
 import { PROCESS_LIST_PS, descendants, parseProcessList } from './proctree';
@@ -31,45 +31,47 @@ export function killTree(child: ChildProcess): void {
   );
 }
 
+/** Where a problem's file is: `pkg` is the node's package when known (from run_results.json). */
+export type LocateProblem = (root: string, pkg: string | undefined, relPath: string) => string;
+
 /**
- * dbt problems tracked per dbt node, so running model B leaves model A's errors alone,
+ * dbt problems tracked per dbt node and project, so running model B leaves model A's errors alone,
  * while re-running A (or its test) replaces A's.
  */
 export class DbtDiagnostics implements vscode.Disposable {
-  private readonly byNode = new Map<string, { file: string; diag: vscode.Diagnostic }[]>();
+  private readonly store = new ProblemStore<vscode.Diagnostic>();
 
-  constructor(private readonly collection: vscode.DiagnosticCollection) {}
+  constructor(
+    private readonly collection: vscode.DiagnosticCollection,
+    private readonly locate: LocateProblem = (root, _pkg, rel) => path.resolve(root, rel.replace(/[\\/]/g, path.sep))
+  ) {}
 
-  update(output: string, cwd: string, executedNodes: string[]): void {
-    for (const n of executedNodes) {
-      this.byNode.delete(n);
-    }
-    const fresh = new Map<string, { file: string; diag: vscode.Diagnostic }[]>();
+  /**
+   * Problems from dbt's console output. `runResultsJson` (this invocation's, if it wrote one) says which nodes ran —
+   * their old problems go — and which package each belongs to: errors in an installed package's nodes point into
+   * its folder, not the project's.
+   */
+  update(output: string, cwd: string, runResultsJson?: string): void {
+    const nodes = runResultsJson ? executedNodes(runResultsJson) : [];
+    const pkgOf = new Map(nodes.map(n => [n.name, n.package]));
+    const fresh: { node: string; file: string; item: vscode.Diagnostic }[] = [];
     for (const p of parseDbtErrors(output)) {
-      const file = path.resolve(cwd, p.relPath.replace(/[\\/]/g, path.sep));
+      const file = this.locate(cwd, pkgOf.get(p.node), p.relPath);
       const diag = new vscode.Diagnostic(
         new vscode.Range(p.line, 0, p.line, Number.MAX_SAFE_INTEGER),
         p.message,
         p.severity === 'warning' ? vscode.DiagnosticSeverity.Warning : vscode.DiagnosticSeverity.Error
       );
       diag.source = 'dbt';
-      fresh.set(p.node, [...(fresh.get(p.node) ?? []), { file, diag }]);
+      fresh.push({ node: p.node, file, item: diag });
     }
-    for (const [node, entries] of fresh) {
-      this.byNode.set(node, entries);
-    }
+    this.store.update(cwd, nodes.map(n => n.name), fresh);
     this.render();
   }
 
   private render(): void {
-    const byFile = new Map<string, vscode.Diagnostic[]>();
-    for (const entries of this.byNode.values()) {
-      for (const { file, diag } of entries) {
-        byFile.set(file, [...(byFile.get(file) ?? []), diag]);
-      }
-    }
     this.collection.clear();
-    for (const [file, diags] of byFile) {
+    for (const [file, diags] of this.store.byFile()) {
       this.collection.set(vscode.Uri.file(file), diags);
     }
   }
@@ -159,7 +161,7 @@ export async function runDbtTask(opts: RunOptions): Promise<number | undefined> 
           } catch {
             json = undefined;
           }
-          opts.diagnostics.update(output, opts.cwd, json ? executedNodeNames(json) : []);
+          opts.diagnostics.update(output, opts.cwd, json);
           settle(code ?? undefined, `\r\n\x1b[${code === 0 ? 32 : 31}m● dbt exited with code ${code}\x1b[0m\r\n`);
           void notifyIfLong(opts, Date.now() - started, code ?? undefined, json);
         });

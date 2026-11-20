@@ -22,6 +22,18 @@ exports.run = async () => {
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const run = (cmd, ...p) => vscode.commands.executeCommand(`dbtCommander.${cmd}`, uri(...p), [uri(...p)]);
   const same = (a, b) => path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
+  // Windows: a file VS Code just saved can stay locked for a moment (EBUSY / EPERM); retry briefly.
+  const writeRetry = async (p, text) => {
+    for (let i = 0; ; i++) {
+      try {
+        fs.writeFileSync(p, text);
+        return;
+      } catch (e) {
+        if (i >= 20 || !['EBUSY', 'EPERM'].includes(e && e.code)) throw e;
+        await sleep(250);
+      }
+    }
+  };
 
   const api = await vscode.extensions.getExtension('local.dataops-dbt-commander').activate();
   // v0.8 commands with their inputs given directly (no input boxes / refactor preview in tests).
@@ -716,8 +728,9 @@ exports.run = async () => {
       await vscode.workspace.saveAll(false);
       assert.match(fs.readFileSync(yml, 'utf8'), /- name: zz_new\r?\n\s+description: ""/);
     } finally {
-      fs.rmSync(f, { force: true });
-      if (before !== undefined) fs.writeFileSync(yml, before);
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+      fs.rmSync(f, { force: true, maxRetries: 5, retryDelay: 200 });
+      if (before !== undefined) await writeRetry(yml, before);
     }
   });
 
@@ -1031,6 +1044,23 @@ exports.run = async () => {
       await closeAll();
       fs.writeFileSync(f, original);
       fs.rmSync(model, { force: true });
+    }
+  });
+
+  // ----- review fixes -----
+
+  await step('paths with spaces: a model and its folder build (dbt splits selectors on spaces)', async () => {
+    const dir = file('models', 'my folder');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'zz_space.sql'), 'select 1 as id\n');
+    try {
+      await run('build', 'models', 'my folder', 'zz_space.sql');
+      assert.deepEqual(results(), ['model.demo.zz_space']);
+      await run('build', 'models', 'my folder');
+      assert.deepEqual(results(), ['model.demo.zz_space']);
+    } finally {
+      await closeAll();
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     }
   });
 

@@ -210,6 +210,36 @@ export function addTestsEdit(
   return { line: insertAt, text: out.join(eol) + eol };
 }
 
+/**
+ * Values typed as a comma-separated list. A value in single or double quotes keeps its commas and spaces
+ * (\`"shipped, partially", placed\`); unquoted values are trimmed; empty ones are dropped.
+ */
+export function parseValueList(input: string): string[] {
+  const out: string[] = [];
+  let i = 0;
+  while (i < input.length) {
+    while (i < input.length && /\s/.test(input[i])) {
+      i++;
+    }
+    const q = input[i];
+    if (q === '"' || q === "'") {
+      const end = input.indexOf(q, i + 1);
+      out.push(input.slice(i + 1, end < 0 ? input.length : end));
+      i = end < 0 ? input.length : end + 1;
+      const comma = input.indexOf(',', i);
+      i = comma < 0 ? input.length : comma + 1; // anything between the closing quote and the comma is ignored
+    } else {
+      const comma = input.indexOf(',', i);
+      const value = input.slice(i, comma < 0 ? input.length : comma).trim();
+      if (value) {
+        out.push(value);
+      }
+      i = comma < 0 ? input.length : comma + 1;
+    }
+  }
+  return out;
+}
+
 /** True for dbt-core before 1.10 (no `arguments:` key for generic tests), or an unknown version: the top-level
  * form works on every 1.x (1.10+ only warns). */
 export function legacyTestArguments(version: string | undefined): boolean {

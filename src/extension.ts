@@ -22,6 +22,7 @@ import { SettingsPanel, detectDbtVersion } from './settingsPanel';
 import { DbtDiagnostics, killTree, lastRunOptions, runDbtTask } from './runner';
 import { listTargets, parseProjectFile, profilesDirCandidates } from './profiles';
 import { ShowResult, compiledPath } from './show';
+import { fileFor } from './manifest';
 import { TestSpec } from './yamlfix';
 import { LanguageDeps, clearManifestCache, inProjectPaths, loadManifest, registerLanguageFeatures } from './language';
 import { Column, appendModel, hasModel, mergeColumns, newModelYaml, parseColumnsOutput, yamlUsable } from './yamlgen';
@@ -351,23 +352,9 @@ function fetchColumns(exe: string, root: string, model: string): Promise<{ colum
 async function fetchRelationColumns(exe: string, root: string, relation: string, label: string): Promise<{ columns: Column[]; error?: string }> {
   const jinja = `{%- for c in adapter.get_columns_in_relation(${relation}) -%}` + 'DBTCOL|{{ c.name }}|{{ c.data_type }}\n{% endfor -%}';
   const args = ['compile', '--inline', jinja, '--quiet', ...flagArgs(cfg().get<string>('target', ''), cfg().get<string>('extraArgs', ''))];
-  return vscode.window.withProgress(
-    { location: vscode.ProgressLocation.Notification, title: `dbt: reading columns of ${label}`, cancellable: true },
-    (_p, token) =>
-      new Promise(resolve => {
-        const child = execFile(
-          exe,
-          args,
-          { cwd: root, maxBuffer: 16 * 1024 * 1024, windowsHide: true, env: { ...process.env, PYTHONIOENCODING: 'utf-8' } },
-          (err, stdout, stderr) => {
-            const columns = parseColumnsOutput(stdout);
-            const text = cleanOutput(`${stdout}\n${stderr}`);
-            resolve(columns.length || !err ? { columns } : { columns, error: text || err.message });
-          }
-        );
-        token.onCancellationRequested(() => killTree(child));
-      })
-  );
+  const { stdout, stderr, error } = await captureDbt(exe, args, root, `dbt: reading columns of ${label}`);
+  const columns = parseColumnsOutput(stdout);
+  return columns.length || !error ? { columns } : { columns, error: cleanOutput(`${stdout}\n${stderr}`) || error.message };
 }
 
 const cleanOutput = (s: string) =>
@@ -815,9 +802,12 @@ const treeUris = (items: DbtItem[]): vscode.Uri[] =>
   items.flatMap(i => (i.data?.targets?.length ? i.data.targets.map(t => vscode.Uri.file(t)) : i.resourceUri ? [i.resourceUri] : []));
 const treeSel = (item: DbtItem | undefined, selected: DbtItem[] | undefined) => pickSelection(item, selected);
 
-/** dbt projects in the workspace — not installed packages, wherever packages-install-path puts them. */
+/**
+ * dbt projects in the workspace — not installed packages, wherever packages-install-path puts them. No result cap:
+ * packages in a custom install folder are found too and filtered out here, and must not crowd out real projects.
+ */
 async function projectRoots(): Promise<string[]> {
-  const found = await vscode.workspace.findFiles('**/dbt_project.yml', '**/{dbt_packages,target,node_modules,.venv,venv,.vscode-test}/**', 50);
+  const found = await vscode.workspace.findFiles('**/dbt_project.yml', '**/{dbt_packages,target,node_modules,.venv,venv,.vscode-test,.git}/**');
   return [...new Set(found.map(u => path.dirname(u.fsPath)))].filter(r => !isPackageRoot(r)).sort();
 }
 
@@ -870,11 +860,16 @@ export interface DbtRunnerApi {
 
 /** Run dbt and capture its output (with a cancellable progress notification). */
 function runCaptured(exe: string, args: string[], cwd: string, title: string): Promise<string> {
+  return captureDbt(exe, args, cwd, title).then(({ stdout, stderr, error }) => `${stdout}\n${stderr}${error && !stdout && !stderr ? error.message : ''}`);
+}
+
+/** Run dbt with a cancellable progress notification; resolves with its output and the failure, if any. */
+function captureDbt(exe: string, args: string[], cwd: string, title: string): Promise<{ stdout: string; stderr: string; error?: Error }> {
   return Promise.resolve(
     vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title, cancellable: true }, (_p, token) =>
-      new Promise<string>(resolve => {
+      new Promise<{ stdout: string; stderr: string; error?: Error }>(resolve => {
         const child = execFile(exe, args, { cwd, maxBuffer: 16 * 1024 * 1024, windowsHide: true, env: { ...process.env, PYTHONIOENCODING: 'utf-8' } }, (err, stdout, stderr) =>
-          resolve(`${stdout}\n${stderr}${err && !stdout && !stderr ? err.message : ''}`)
+          resolve({ stdout, stderr, ...(err ? { error: err } : {}) })
         );
         token.onCancellationRequested(() => killTree(child));
       })
@@ -903,7 +898,11 @@ async function migrateSettings(): Promise<number> {
 
 export function activate(ctx: vscode.ExtensionContext): DbtRunnerApi {
   context = ctx;
-  diagnostics = new DbtDiagnostics(vscode.languages.createDiagnosticCollection('dbt'));
+  // Problems in an installed package's nodes point into its folder under packages-install-path.
+  diagnostics = new DbtDiagnostics(vscode.languages.createDiagnosticCollection('dbt'), (root, pkg, rel) => {
+    const project = readProject(root).name ?? path.basename(root);
+    return fileFor(root, project, pkg ?? project, rel, pathsOf(root).packagesInstall);
+  });
   // Settings from before the rename (dbt Runner → DataOps dbt Commander); then refresh what depends on them.
   void migrateSettings().then(n => {
     if (n) {

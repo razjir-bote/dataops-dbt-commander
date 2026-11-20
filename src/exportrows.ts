@@ -71,8 +71,15 @@ export function viewRows(rows: Row[], view: ViewState): Row[] {
   return out;
 }
 
+const NUMBER = /^[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$/;
+
+/**
+ * A cell as exported text. Text a spreadsheet would run as a formula (starting with = + - @, tab or CR) gets a
+ * leading apostrophe — Excel shows the text, not a formula result; numbers are left alone.
+ */
 function cellText(v: unknown): string {
-  return v === null || v === undefined ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v);
+  const s = v === null || v === undefined ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v);
+  return /^[=+\-@\t\r]/.test(s) && !NUMBER.test(s) ? `'${s}` : s;
 }
 
 /** RFC 4180 CSV (CRLF line ends); NULL is an empty field. */

@@ -110,7 +110,8 @@ export interface ManifestIndex {
   patches: Map<string, string>;
 }
 
-function fileFor(root: string, rootPackage: string, pkg: string, original: string, packagesDir = 'dbt_packages'): string {
+/** A node's file: in the project, or in its package's folder under packages-install-path. */
+export function fileFor(root: string, rootPackage: string, pkg: string, original: string, packagesDir = 'dbt_packages'): string {
   const rel = original.split(/[\\/]/);
   return pkg === rootPackage ? path.join(root, ...rel) : path.join(root, ...packagesDir.split('/'), pkg, ...rel);
 }

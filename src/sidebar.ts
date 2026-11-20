@@ -126,11 +126,7 @@ export class DbtSidebar implements vscode.TreeDataProvider<DbtItem>, vscode.Disp
   }
 
   private async projectRoots(): Promise<string[]> {
-    if (this.deps.projectRoots) {
-      return this.deps.projectRoots();
-    }
-    const found = await vscode.workspace.findFiles('**/dbt_project.yml', '**/{dbt_packages,target,node_modules,.venv,venv,.vscode-test}/**', 50);
-    return [...new Set(found.map(u => path.dirname(u.fsPath)))].sort();
+    return (await this.deps.projectRoots?.()) ?? [];
   }
 
   private async sections(root: string): Promise<DbtItem[]> {
