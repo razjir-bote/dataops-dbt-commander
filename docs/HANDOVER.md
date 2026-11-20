@@ -1,7 +1,7 @@
 # DataOps dbt Commander — developer handover
 
 Keep this file current: update it in the same commit as any change to features, architecture, build/release
-process, or known issues. Last updated: 2026-11-21 (renamed to DataOps dbt Commander, v0.9.0, new repo).
+process, or known issues. Last updated: 2026-11-21 (v0.9.0 released from the new repo).
 
 ## What this is
 A VS Code extension (TypeScript) for working with **dbt-core 1.x** (tested with 1.12.7) on **Windows**, running
@@ -14,7 +14,8 @@ Since v0.9.0 the extension ID is `local.dataops-dbt-commander` and every command
 is `dbtCommander.*`; `migrate.ts` copies old `dbtRunner.*` user and workspace settings once on activation.
 
 ## Status
-- **v0.9.0** (being released from the new repo): the rename to DataOps dbt Commander (`dbtCommander.*` IDs,
+- **v0.9.0 — released** from the new repo (https://github.com/razjir-bote/dataops-dbt-commander/releases/tag/v0.9.0)
+  and installed locally as `local.dataops-dbt-commander@0.9.0` (old `local.dbt-runner` uninstalled): the rename to DataOps dbt Commander (`dbtCommander.*` IDs,
   settings migration) plus everything from v0.7 and v0.8, and a fix found by CI: rename refused to rename back
   right after a rename because the stale manifest still listed the old name (`takenModelNames` now ignores
   manifest entries whose file is gone). Previously released: v0.6.1 (old repo).
