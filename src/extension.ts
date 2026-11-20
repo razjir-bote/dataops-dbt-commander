@@ -13,6 +13,7 @@ import {
   groupByProject,
   modelName,
   folderSelectors,
+  graphSelectors,
   modelSelector,
   withGraph
 } from './dbt';
@@ -231,13 +232,21 @@ const displayName = (p: string) => (isDir(p) ? path.basename(p) + '/' : modelNam
 // ---------- commands ----------
 
 async function runDbt(action: DbtAction, graph: GraphScope, uri?: vscode.Uri, uris?: vscode.Uri[]): Promise<void> {
-  const sel = await resolveSelection(uri, uris, graph === 'none', graph === 'none' && action !== 'run' ? 'buildable' : 'model');
-  const exe = sel && (await requireExe());
-  if (!sel || !exe) {
+  // Folders select everything inside them (subfolders included); build / test also take seeds.
+  const sel = await resolveSelection(uri, uris, true, action !== 'run' ? 'buildable' : 'model');
+  if (!sel) {
     return;
   }
-  // Folders select everything inside them (subfolders included); the project folder itself = everything.
-  const selectors = graph === 'none' ? folderSelectors(sel.root, sel.paths) : sel.paths.map(p => withGraph(modelSelector(sel.root, p), graph));
+  // The project folder itself = everything (no selector); with upstream/downstream that has no meaning.
+  const selectors = graph === 'none' ? folderSelectors(sel.root, sel.paths) : graphSelectors(sel.root, sel.paths, graph);
+  if (!selectors) {
+    void vscode.window.showErrorMessage('dbt Runner: upstream / downstream needs models, seeds or folders inside the project, not the whole project.');
+    return;
+  }
+  const exe = await requireExe();
+  if (!exe) {
+    return;
+  }
   const args = buildArgs(action, selectors, cfg().get<string>('target', ''), cfg().get<string>('extraArgs', ''));
   await runDbtTask({
     exe,
@@ -756,6 +765,11 @@ export function activate(ctx: vscode.ExtensionContext): { sidebar: DbtSidebar; t
       runDbt('test', 'none', undefined, treeUris(treeSel(item, selected)))
     ),
     vscode.commands.registerCommand('dbtRunner.tree.seed', (item?: DbtItem, selected?: DbtItem[]) => seedFiles(undefined, treeUris(treeSel(item, selected)))),
+    ...(['upstream', 'downstream', 'both'] as GraphScope[]).map(scope =>
+      vscode.commands.registerCommand(`dbtRunner.tree.build${scope === 'upstream' ? 'Upstream' : scope === 'downstream' ? 'Downstream' : 'UpDownstream'}`, (item?: DbtItem, selected?: DbtItem[]) =>
+        runDbt('build', scope, undefined, treeUris(treeSel(item, selected)))
+      )
+    ),
     vscode.commands.registerCommand('dbtRunner.tree.snapshot', (item?: DbtItem, selected?: DbtItem[]) => runNodes(treeSel(item, selected), 'snapshot')),
     vscode.commands.registerCommand('dbtRunner.tree.runTest', (item?: DbtItem, selected?: DbtItem[]) => runNodes(treeSel(item, selected), 'test')),
     vscode.commands.registerCommand('dbtRunner.tree.snapshotAll', (item: DbtItem) => projectCommand(['snapshot'], 'snapshot', item.root))

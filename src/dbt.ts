@@ -96,6 +96,14 @@ export function folderSelectors(root: string, paths: string[]): string[] {
   return paths.some(p => samePath(p, root)) ? [] : paths.map(p => modelSelector(root, p));
 }
 
+/**
+ * `path:` selectors with graph operators (`+sel`, `sel+`, `+sel+`) for files and folders. Undefined when the
+ * project folder itself is selected: "everything plus its upstream" has no selector (dbt rejects `path:.`).
+ */
+export function graphSelectors(root: string, paths: string[], scope: GraphScope): string[] | undefined {
+  return paths.some(p => samePath(p, root)) ? undefined : paths.map(p => withGraph(modelSelector(root, p), scope));
+}
+
 /** Locate dbt inside a venv: Windows layout first, then POSIX. */
 export function dbtExecutable(venvPath: string, exists: (p: string) => boolean): string | undefined {
   if (!venvPath.trim()) {

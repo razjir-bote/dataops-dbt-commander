@@ -374,6 +374,25 @@ exports.run = async () => {
     // Build on a single seed (seeds are buildable now).
     await vscode.commands.executeCommand('dbtRunner.tree.build', s, [s]);
     assert.deepEqual(results(), ['seed.demo.s']);
+
+    // Upstream / downstream on a selection: one command, graph operators on each selected item.
+    await vscode.commands.executeCommand('dbtRunner.tree.buildDownstream', stagingFolder, [stagingFolder]);
+    let g = results();
+    for (const id of ['model.demo.stg_a', 'model.demo.b', 'model.demo.c', 'snapshot.demo.snap']) {
+      assert.ok(g.includes(id), `downstream: ${id} missing from ${g.join(',')}`);
+    }
+    await vscode.commands.executeCommand('dbtRunner.tree.buildUpstream', c, [c, s]);
+    g = results();
+    for (const id of ['model.demo.stg_a', 'model.demo.b', 'model.demo.c', 'seed.demo.s']) {
+      assert.ok(g.includes(id), `upstream: ${id} missing from ${g.join(',')}`);
+    }
+    assert.ok(!g.includes('seed.demo.countries') && !g.includes('snapshot.demo.snap'), 'upstream built too much: ' + g.join(','));
+
+    // The project folder has no "upstream": refused, nothing runs.
+    const rr = file('target', 'run_results.json');
+    const before = fs.statSync(rr).mtimeMs;
+    await vscode.commands.executeCommand('dbtRunner.tree.buildUpstream', { resourceUri: vscode.Uri.file(root), data: {} }, undefined);
+    assert.equal(fs.statSync(rr).mtimeMs, before, 'dbt ran for upstream of the whole project');
   });
 
   const lineageTree = async () => {

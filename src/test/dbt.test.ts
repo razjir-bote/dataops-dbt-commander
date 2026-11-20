@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as path from 'path';
-import { buildArgs, dbtExecutable, findProjectRoot, folderSelectors, groupByProject, modelName, modelSelector, parseDbtVersion, splitArgs, withGraph } from '../dbt';
+import { buildArgs, dbtExecutable, findProjectRoot, folderSelectors, graphSelectors, groupByProject, modelName, modelSelector, parseDbtVersion, splitArgs, withGraph } from '../dbt';
 
 test('withGraph adds dbt graph operators', () => {
   assert.equal(withGraph('path:models/a.sql', 'none'), 'path:models/a.sql');
@@ -107,4 +107,14 @@ test('findProjectRoot skips projects inside dbt_packages', () => {
 test('findProjectRoot does not walk above stopAt', () => {
   const ok = (p: string) => p === path.join('C:/home', 'dbt_project.yml');
   assert.equal(findProjectRoot('C:/home/work/models/x.sql', ok, path.join('C:/home/work')), undefined);
+});
+
+test('graphSelectors adds graph operators to files and folders, refuses the project folder', () => {
+  const root = path.join('C:/p');
+  assert.deepEqual(graphSelectors(root, [path.join(root, 'models', 'b.sql'), path.join(root, 'seeds', 'ref')], 'downstream'), [
+    'path:models/b.sql+',
+    'path:seeds/ref+'
+  ]);
+  assert.deepEqual(graphSelectors(root, [path.join(root, 'models', 'staging')], 'both'), ['+path:models/staging+']);
+  assert.equal(graphSelectors(root, [path.join(root, 'models'), root], 'upstream'), undefined);
 });

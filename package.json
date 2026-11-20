@@ -169,6 +169,21 @@
         "title": "Follow active editor",
         "category": "dbt Runner",
         "icon": "$(link)"
+      },
+      {
+        "command": "dbtRunner.tree.buildUpstream",
+        "title": "Build + Upstream",
+        "category": "dbt Runner"
+      },
+      {
+        "command": "dbtRunner.tree.buildDownstream",
+        "title": "Build + Downstream",
+        "category": "dbt Runner"
+      },
+      {
+        "command": "dbtRunner.tree.buildUpDownstream",
+        "title": "Build + Upstream & Downstream",
+        "category": "dbt Runner"
       }
     ],
     "submenus": [
@@ -348,6 +363,18 @@
         {
           "command": "dbtRunner.lineage.followEditor",
           "when": "dbtRunner.lineagePinned"
+        },
+        {
+          "command": "dbtRunner.tree.buildUpstream",
+          "when": "false"
+        },
+        {
+          "command": "dbtRunner.tree.buildDownstream",
+          "when": "false"
+        },
+        {
+          "command": "dbtRunner.tree.buildUpDownstream",
+          "when": "false"
         }
       ],
       "view/title": [
@@ -462,6 +489,21 @@
           "command": "dbtRunner.tree.runTest",
           "when": "view == dbtRunner.project && viewItem == test",
           "group": "0_dbt@6"
+        },
+        {
+          "command": "dbtRunner.tree.buildUpstream",
+          "when": "view == dbtRunner.project && viewItem =~ /^(model|modelFolder|section-models|seed|seedFolder|section-seeds)$/",
+          "group": "1_graph@1"
+        },
+        {
+          "command": "dbtRunner.tree.buildDownstream",
+          "when": "view == dbtRunner.project && viewItem =~ /^(model|modelFolder|section-models|seed|seedFolder|section-seeds)$/",
+          "group": "1_graph@2"
+        },
+        {
+          "command": "dbtRunner.tree.buildUpDownstream",
+          "when": "view == dbtRunner.project && viewItem =~ /^(model|modelFolder|section-models|seed|seedFolder|section-seeds)$/",
+          "group": "1_graph@3"
         }
       ]
     },
