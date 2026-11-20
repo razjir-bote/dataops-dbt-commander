@@ -51,6 +51,8 @@ export interface MacroEntry {
   file?: string;
   /** dbt's own (`dbt`) or the adapter's macros: callable without a package prefix, like the project's. */
   internal?: boolean;
+  /** A generic test (`{% test name(...) %}`, stored by dbt as macro `test_name`). */
+  test?: boolean;
   /** From YAML `macros:` properties. */
   description?: string;
   arguments?: { name: string; type?: string; description?: string }[];
@@ -238,6 +240,8 @@ export function parseManifest(
         package: mc.package_name,
         file,
         ...(internal ? { internal } : {}),
+        // dbt stores `{% test x %}` as macro test_x; a plain macro named test_* is not a test.
+        ...((typeof mc.macro_sql === 'string' ? /^\s*\{%-?\s*test\s/.test(mc.macro_sql) : mc.name.startsWith('test_')) ? { test: true } : {}),
         ...(text(mc.description) ? { description: mc.description } : {}),
         ...(args.length ? { arguments: args } : {})
       });

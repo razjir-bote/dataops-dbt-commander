@@ -24,6 +24,7 @@ import { listTargets, parseProjectFile, profilesDirCandidates } from './profiles
 import { ShowResult, compiledPath } from './show';
 import { fileFor } from './manifest';
 import { SqlFluff } from './sqlfluffRunner';
+import { DbtYamlCompletionProvider } from './yamlCompletion';
 import { TestSpec } from './yamlfix';
 import { LanguageDeps, clearManifestCache, inProjectPaths, loadManifest, registerLanguageFeatures } from './language';
 import { Column, appendModel, hasModel, mergeColumns, newModelYaml, parseColumnsOutput, yamlUsable } from './yamlgen';
@@ -984,6 +985,16 @@ export function activate(ctx: vscode.ExtensionContext): DbtRunnerApi {
   void runStatus.init();
 
   registerLanguageFeatures(ctx, languageDeps, runStatus);
+  // v0.13: models, columns, tests, keys and config values in the project's YAML files.
+  ctx.subscriptions.push(
+    vscode.languages.registerCompletionItemProvider(
+      [{ scheme: 'file', language: 'yaml' }, { scheme: 'file', pattern: '**/*.{yml,yaml}' }],
+      new DbtYamlCompletionProvider({ ...languageDeps, isProjectYaml: queryDeps.isProjectYaml, dbtVersion: queryDeps.dbtVersion }),
+      ' ',
+      "'",
+      '"'
+    )
+  );
 
   // Optional SQLFluff (dbtCommander.sqlfluff.enabled, off by default): registers nothing that runs while off.
   const sqlfluff = new SqlFluff({

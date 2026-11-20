@@ -134,7 +134,7 @@ class DbtDefinitionProvider implements vscode.DefinitionProvider {
   }
 }
 
-class DbtCompletionProvider implements vscode.CompletionItemProvider {
+export class DbtCompletionProvider implements vscode.CompletionItemProvider {
   constructor(private readonly deps: LanguageDeps) {}
 
   async provideCompletionItems(doc: vscode.TextDocument, pos: vscode.Position): Promise<vscode.CompletionItem[] | undefined> {

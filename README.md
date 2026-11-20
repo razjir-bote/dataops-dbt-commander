@@ -99,6 +99,12 @@ Supports dbt-core 1.x (tested with 1.12); not dbt 2 / Fusion.
   (separate opt-in) fixes a file when you save it yourself. Your `.sqlfluff` / `.sqlfluffignore` are used; with no
   dialect configured, the dbt adapter's is passed (`synapse` → `tsql`, `duckdb`, `snowflake`, …). *Off* turns every
   SQLFluff feature off and never starts SQLFluff.
+- **YAML autocomplete** — in your project's `.yml` files: model names after `- name:` under `models:` (models without
+  a YAML entry first), seeds / snapshots / macros likewise, a model's **column names** (with types, from
+  `target/catalog.json` — run *dbt docs generate* first), **tests** under `data_tests:` (built-ins as templates,
+  plus generic tests from your project and packages such as `dbt_utils.*`), the **keys** that fit where you are
+  (model, column, source, `config:` …) and **config values** (`materialized:`, `on_schema_change:` …), and
+  `ref('` / `source('` names.
 - **Hover on macros** — signature, description and documented arguments (from `macros:` YAML) of a macro call.
 - Saved last-run results of models / tests that no longer exist are dropped when the manifest changes.
 

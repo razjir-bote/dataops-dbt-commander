@@ -1151,5 +1151,56 @@ exports.run = async () => {
     }
   });
 
+  // ----- v0.13: YAML autocomplete -----
+
+  await step('YAML autocomplete: model names, columns (catalog), tests, keys, config values, ref()', async () => {
+    const f = file('models', 'zz_complete.yml');
+    const text = [
+      'version: 2',
+      'models:',
+      '  - name: b',
+      '    columns:',
+      '      - name: ',
+      '        data_tests:',
+      '          - ',
+      '    config:',
+      '      materialized: ',
+      '  - name: ',
+      '    ',
+      'unit_tests:',
+      '  - name: t',
+      "    model: ",
+      ''
+    ].join('\n');
+    fs.writeFileSync(f, text);
+    try {
+      const doc = await vscode.workspace.openTextDocument(f);
+      const labelsAt = async (line, col) => {
+        const list = await vscode.commands.executeCommand('vscode.executeCompletionItemProvider', doc.uri, new vscode.Position(line, col));
+        return list.items.map(i => (typeof i.label === 'string' ? i.label : i.label.label));
+      };
+      const line = n => doc.lineAt(n).text.length;
+      // catalog.json exists: docs generate ran earlier in the suite.
+      assert.ok((await labelsAt(4, line(4))).includes('id'), 'column id of b from the catalog');
+      const tests = await labelsAt(6, line(6));
+      for (const t of ['not_null', 'unique', 'accepted_values', 'relationships']) assert.ok(tests.includes(t), t + ' missing: ' + tests.join(','));
+      const mats = await labelsAt(8, line(8));
+      for (const m of ['view', 'table', 'incremental', 'ephemeral']) assert.ok(mats.includes(m), m);
+      const models = await labelsAt(9, line(9));
+      // b is already listed in this file, so only the others are offered.
+      assert.ok(!models.includes('b') && models.includes('c'), models.join(','));
+      const keys = await labelsAt(10, line(10));
+      assert.ok(keys.includes('description') && keys.includes('columns') && !keys.includes('name'), keys.join(','));
+      assert.ok((await labelsAt(13, line(13))).includes('b'), 'unit test model');
+      // Not in YAML that isn't a property file: dbt_project.yml's models: is a different structure.
+      const project = await vscode.workspace.openTextDocument(file('dbt_project.yml'));
+      const plist = await vscode.commands.executeCommand('vscode.executeCompletionItemProvider', project.uri, new vscode.Position(0, 0));
+      assert.ok(!plist.items.some(i => (typeof i.label === 'string' ? i.label : i.label.label) === 'semantic_models'), 'dbt keys offered in dbt_project.yml');
+    } finally {
+      await closeAll();
+      fs.rmSync(f, { force: true });
+    }
+  });
+
   fs.writeFileSync(process.env.ITEST_OUT, out.join('\n'));
 };

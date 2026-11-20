@@ -1,7 +1,7 @@
 # DataOps dbt Commander — developer handover
 
 Keep this file current: update it in the same commit as any change to features, architecture, build/release
-process, or known issues. Last updated: 2026-11-21 (v0.12.0 released: optional SQLFluff, Show lineage on any node).
+process, or known issues. Last updated: 2026-11-21 (v0.13.0 released: YAML autocomplete).
 
 ## What this is
 A VS Code extension (TypeScript) for working with **dbt-core 1.x** (tested with 1.12.7) on **Windows**, running
@@ -14,6 +14,18 @@ Since v0.9.0 the extension ID is `local.dataops-dbt-commander` and every command
 is `dbtCommander.*`; `migrate.ts` copies old `dbtRunner.*` user and workspace settings once on activation.
 
 ## Status
+- **v0.13.0 — released** (https://github.com/razjir-bote/dataops-dbt-commander/releases/tag/v0.13.0): **YAML autocomplete.** `yamlcontext.ts` (pure: path / kind / siblings /
+  item names at the cursor, from indentation, so half-typed YAML works), `yamlcomplete.ts` (pure: what to suggest
+  where — keys per place, config values, test snippets honouring `arguments:` by dbt version, materializations from
+  `materialization_*` macros), `yamlCompletion.ts` (provider: manifest + catalog.json; `ref('` / `source('` delegate
+  to the SQL `DbtCompletionProvider`). Columns come from catalog.json only — no warehouse queries while typing.
+  Design: `docs/superpowers/specs/2026-11-21-dbt-commander-v0.13-yaml-autocomplete-design.md`.
+  From the review: only YAML in resource folders (model / seed / snapshot / macro / analysis / test paths), never
+  `dbt_project.yml`; block-scalar text (`description: |`) is not structure; anchors / tags on a parent key, quoted
+  values, bare `-` lines, indentless-list siblings and `---` documents handled; generic tests are macros whose
+  `macro_sql` starts with `{% test` (`MacroEntry.test`); base data cached per manifest (WeakMap); no manifest load for
+  keys that don't need it. Not done (minor): quoted / `+`-prefixed keys aren't read as keys; versioned-model column
+  names come from the model's latest version in the catalog.
 - **v0.12.0 — released** (https://github.com/razjir-bote/dataops-dbt-commander/releases/tag/v0.12.0): **optional SQLFluff**, off by default (`dbtCommander.sqlfluff.enabled`
   off / on / auto). `sqlfluff.ts` (pure: JSON parsing, dialect from adapter, config detection, args, CRLF→file EOL)
   and `sqlfluffRunner.ts` (stdin runs with `--stdin-filename`, so `.sqlfluff` / `.sqlfluffignore` apply; problems on
@@ -97,7 +109,7 @@ npm run package              # esbuild → dist/extension.js, then vsce → .vsi
 - **Integration suite** (`test/integration/run.js` + `suite.js`): copies `test/fixtures/demo` to
   `.vscode-test/work/demo`, creates `.vscode-test/dbt-venv` (dbt-core~=1.12.0 + dbt-duckdb) on first run
   (`DBT_PYTHON` picks the Python; default `py -3.12` on Windows), launches VS Code with the extension and prints
-  `PASS`/`FAIL` lines; exits 1 on any FAIL. ~4–5 min. Currently 68 checks; the v0.10 ones are last because they add a
+  `PASS`/`FAIL` lines; exits 1 on any FAIL. ~4–5 min. Currently 69 checks; the v0.10 ones are last because they add a
   temporary model and feed a fake run_results file to the run-state store (which then is "the last run"). The suite talks to the extension
   through the API returned by `activate()` (`sidebar`, `tests`, `lineage`, `runStatus`, `projectEdits`, `query`, …).
 - **CI** (`.github/workflows/ci.yml`): windows-latest, Node 22, Python 3.12; typecheck, unit, integration,
@@ -135,6 +147,7 @@ npm run package              # esbuild → dist/extension.js, then vsce → .vsi
 | `testing.ts` | Testing panel controller; runs `dbt test`, maps run_results; snapshot-based runs |
 | `settingsPanel.ts` | settings webview (venv, target, extra flags) |
 | `query.ts` | `runShow` (shared by Preview Data), scratchpads, preview selection / CTE, YAML quick-fix code actions |
+| `yamlcontext.ts` / `yamlcomplete.ts` / `yamlCompletion.ts` | pure YAML cursor context / pure suggestion rules / YAML completion provider |
 | `sqlfluff.ts` / `sqlfluffRunner.ts` | pure SQLFluff helpers / optional linting, fix on save, formatter, commands |
 | `exportrows.ts` / `profile.ts` | pure: preview sort / filter / CSV / TSV / profile query + display rows |
 | `scratch.ts` / `yamlfix.ts` / `macrohover.ts` | pure: CTE parser + inline SQL / column test insertions / macro signature + hover text |
