@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { LanguageDeps, loadManifest } from './language';
 import { ManifestIndex, sourceTableLine } from './manifest';
+import { levelOf, sectionTargets } from './tree';
 
 export type ItemKind =
   | 'project'
@@ -12,6 +13,7 @@ export type ItemKind =
   | 'source'
   | 'sourceTable'
   | 'seed'
+  | 'seedFolder'
   | 'snapshot'
   | 'testGroup'
   | 'test'
@@ -25,7 +27,7 @@ export class DbtItem extends vscode.TreeItem {
     readonly kind: ItemKind,
     readonly root: string,
     collapsible: vscode.TreeItemCollapsibleState,
-    readonly data: { section?: Section; dir?: string; source?: string; model?: string; name?: string } = {}
+    readonly data: { section?: Section; dir?: string; source?: string; model?: string; name?: string; targets?: string[] } = {}
   ) {
     super(label, collapsible);
     this.contextValue = kind;
@@ -80,6 +82,7 @@ export class DbtSidebar implements vscode.TreeDataProvider<DbtItem>, vscode.Disp
         const it = new DbtItem(this.deps.projectNameOf(r) ?? path.basename(r), 'project', r, Expanded);
         it.description = vscode.workspace.asRelativePath(r);
         it.iconPath = new vscode.ThemeIcon('project');
+        it.resourceUri = vscode.Uri.file(r); // Build / Seed on the project = whole project
         return it;
       });
     }
@@ -90,7 +93,9 @@ export class DbtSidebar implements vscode.TreeDataProvider<DbtItem>, vscode.Disp
       case 'section':
         return index ? this.sectionChildren(item, index) : [];
       case 'modelFolder':
-        return index ? this.modelLevel(item.root, index, item.data.dir!) : [];
+        return index ? this.folderLevel(item.root, index, 'model', item.data.dir!) : [];
+      case 'seedFolder':
+        return index ? this.folderLevel(item.root, index, 'seed', item.data.dir!) : [];
       case 'source':
         return index ? this.sourceTables(item.root, index, item.data.source!) : [];
       case 'testGroup':
@@ -127,6 +132,16 @@ export class DbtSidebar implements vscode.TreeDataProvider<DbtItem>, vscode.Disp
         const it = new DbtItem(label, 'section', root, section === 'models' ? Expanded : Collapsed, { section });
         it.description = String(n);
         it.iconPath = new vscode.ThemeIcon(icon);
+        // Section buttons act on the section's folder (models/, seeds/), or the whole project.
+        it.contextValue = `section-${section}`;
+        if (section === 'models' || section === 'seeds') {
+          // Usually models/ or seeds/; with several top-level folders, each of them (never the whole project).
+          const targets = sectionTargets(root, this.entries(root, index, section === 'models' ? 'model' : 'seed').map(e => e.file));
+          it.data.targets = targets;
+          it.resourceUri = vscode.Uri.file(targets[0] ?? root);
+        } else {
+          it.resourceUri = vscode.Uri.file(root);
+        }
         return it;
       });
   }
@@ -140,7 +155,7 @@ export class DbtSidebar implements vscode.TreeDataProvider<DbtItem>, vscode.Disp
     const pkg = this.rootPackage(root);
     switch (item.data.section) {
       case 'models':
-        return this.modelLevel(root, index, '');
+        return this.folderLevel(root, index, 'model', '');
       case 'sources':
         return [...new Set(index.sources.filter(s => s.package === pkg).map(s => s.source))].sort().map(source => {
           const it = new DbtItem(source, 'source', root, Collapsed, { source });
@@ -148,7 +163,7 @@ export class DbtSidebar implements vscode.TreeDataProvider<DbtItem>, vscode.Disp
           return it;
         });
       case 'seeds':
-        return this.leaves(root, index.seeds, 'seed', 'table');
+        return this.folderLevel(root, index, 'seed', '');
       case 'snapshots':
         return this.leaves(root, index.snapshots, 'snapshot', 'history');
       case 'tests': {
@@ -166,43 +181,52 @@ export class DbtSidebar implements vscode.TreeDataProvider<DbtItem>, vscode.Disp
     }
   }
 
-  /** Folders, then models, directly inside `dir` (relative to the project root, '' = top). */
-  private modelLevel(root: string, index: ManifestIndex, dir: string): DbtItem[] {
+  /** The project's own models or seeds, as {name, file}. */
+  private entries(root: string, index: ManifestIndex, kind: 'model' | 'seed'): { name: string; file: string }[] {
     const pkg = this.rootPackage(root);
-    const rel = (f: string) => path.relative(root, f).split(path.sep).join('/');
-    const models = index.models.filter(m => m.package === pkg);
-    const prefix = dir ? dir + '/' : '';
-    const folders = new Set<string>();
-    const here: DbtItem[] = [];
-    for (const m of models) {
-      const r = rel(m.file);
-      if (!r.startsWith(prefix)) {
-        continue;
+    return kind === 'model' ? index.models.filter(m => m.package === pkg) : index.seeds;
+  }
+
+  /**
+   * The folder a section stands for: its single top-level folder (usually `models/` or `seeds/`, which the tree
+   * skips straight into), else the project folder itself (= everything).
+   */
+  private topDir(root: string, files: string[]): string {
+    let dir = '';
+    for (;;) {
+      const level = levelOf(root, files, dir);
+      if (level.folders.length !== 1 || level.files.length || dir) {
+        return dir;
       }
-      const rest = r.slice(prefix.length);
-      if (rest.includes('/')) {
-        folders.add(rest.split('/')[0]);
-      } else {
-        const it = new DbtItem(m.name, 'model', root, None, { name: m.name });
-        it.resourceUri = vscode.Uri.file(m.file);
-        it.iconPath = new vscode.ThemeIcon('symbol-class');
-        it.command = openCommand(m.file);
-        it.tooltip = rel(m.file);
-        here.push(it);
-      }
+      dir = level.folders[0];
     }
-    const folderItems = [...folders].sort().map(f => {
-      const d = prefix + f;
-      const it = new DbtItem(f, 'modelFolder', root, dir ? Collapsed : Expanded, { dir: d });
+  }
+
+  /** Folders, then models / seeds, directly inside `dir` (relative to the project root, '' = top). */
+  private folderLevel(root: string, index: ManifestIndex, kind: 'model' | 'seed', dir: string): DbtItem[] {
+    const entries = this.entries(root, index, kind);
+    const start = dir || this.topDir(root, entries.map(e => e.file));
+    const level = levelOf(root, entries.map(e => e.file), start);
+    const byFile = new Map(entries.map(e => [e.file, e]));
+    const folders = level.folders.map(f => {
+      const d = start ? `${start}/${f}` : f;
+      const it = new DbtItem(f, kind === 'model' ? 'modelFolder' : 'seedFolder', root, dir ? Collapsed : Expanded, { dir: d });
       it.resourceUri = vscode.Uri.file(path.join(root, ...d.split('/')));
       it.iconPath = vscode.ThemeIcon.Folder;
       return it;
     });
-    // At the top level the only folder is usually "models"; skip straight into it.
-    if (!dir && folderItems.length === 1 && here.length === 0) {
-      return this.modelLevel(root, index, folderItems[0].data.dir!);
-    }
-    return [...folderItems, ...here.sort((a, b) => String(a.label).localeCompare(String(b.label)))];
+    const leaves = level.files
+      .map(f => byFile.get(f)!)
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map(e => {
+        const it = new DbtItem(e.name, kind, root, None, { name: e.name });
+        it.resourceUri = vscode.Uri.file(e.file);
+        it.iconPath = new vscode.ThemeIcon(kind === 'model' ? 'symbol-class' : 'table');
+        it.command = openCommand(e.file);
+        it.tooltip = path.relative(root, e.file);
+        return it;
+      });
+    return [...folders, ...leaves];
   }
 
   private sourceTables(root: string, index: ManifestIndex, source: string): DbtItem[] {

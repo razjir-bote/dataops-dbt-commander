@@ -2,7 +2,7 @@
   "name": "dbt-runner",
   "displayName": "dbt Runner",
   "description": "Run, build, test, compile and preview dbt models from the VS Code Explorer and editor with dbt-core 1.x from a configured venv.",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "publisher": "local",
   "license": "MIT",
   "engines": {
@@ -151,6 +151,24 @@
         "title": "Run test",
         "category": "dbt Runner",
         "icon": "$(play)"
+      },
+      {
+        "command": "dbtRunner.tree.snapshotAll",
+        "title": "Snapshot all",
+        "category": "dbt Runner",
+        "icon": "$(play)"
+      },
+      {
+        "command": "dbtRunner.showLineage",
+        "title": "Show lineage",
+        "category": "dbt Runner",
+        "icon": "$(type-hierarchy)"
+      },
+      {
+        "command": "dbtRunner.lineage.followEditor",
+        "title": "Follow active editor",
+        "category": "dbt Runner",
+        "icon": "$(link)"
       }
     ],
     "submenus": [
@@ -243,6 +261,11 @@
           "command": "dbtRunner.generateYaml",
           "group": "inspect@3",
           "when": "!explorerResourceIsFolder"
+        },
+        {
+          "command": "dbtRunner.showLineage",
+          "group": "inspect@4",
+          "when": "!explorerResourceIsFolder"
         }
       ],
       "commandPalette": [
@@ -313,6 +336,18 @@
         {
           "command": "dbtRunner.tree.runTest",
           "when": "false"
+        },
+        {
+          "command": "dbtRunner.showLineage",
+          "when": "editorIsOpen && resourceScheme == file && resourcePath not =~ /[\\\\/](dbt_packages|target)[\\\\/]/i && ((resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/](models|snapshots)[\\\\/]/i) || (resourceExtname =~ /^\\.csv$/i && resourcePath =~ /[\\\\/]seeds[\\\\/]/i))"
+        },
+        {
+          "command": "dbtRunner.tree.snapshotAll",
+          "when": "false"
+        },
+        {
+          "command": "dbtRunner.lineage.followEditor",
+          "when": "dbtRunner.lineagePinned"
         }
       ],
       "view/title": [
@@ -325,28 +360,33 @@
           "command": "dbtRunner.parse",
           "when": "view == dbtRunner.project",
           "group": "navigation@2"
+        },
+        {
+          "command": "dbtRunner.lineage.followEditor",
+          "when": "view == dbtRunner.lineage && dbtRunner.lineagePinned",
+          "group": "navigation@1"
         }
       ],
       "view/item/context": [
         {
           "command": "dbtRunner.tree.run",
-          "when": "view == dbtRunner.project && viewItem =~ /^(model|modelFolder)$/",
+          "when": "view == dbtRunner.project && viewItem =~ /^(model|modelFolder|section-models)$/",
+          "group": "inline@1"
+        },
+        {
+          "command": "dbtRunner.tree.seed",
+          "when": "view == dbtRunner.project && viewItem =~ /^(seed|seedFolder|section-seeds|project)$/",
           "group": "inline@1"
         },
         {
           "command": "dbtRunner.tree.build",
-          "when": "view == dbtRunner.project && viewItem =~ /^(model|modelFolder)$/",
+          "when": "view == dbtRunner.project && viewItem =~ /^(model|modelFolder|section-models|seedFolder|section-seeds|project)$/",
           "group": "inline@2"
         },
         {
           "command": "dbtRunner.tree.test",
-          "when": "view == dbtRunner.project && viewItem =~ /^(model|modelFolder)$/",
+          "when": "view == dbtRunner.project && viewItem =~ /^(model|modelFolder|section-models)$/",
           "group": "inline@3"
-        },
-        {
-          "command": "dbtRunner.tree.seed",
-          "when": "view == dbtRunner.project && viewItem == seed",
-          "group": "inline@1"
         },
         {
           "command": "dbtRunner.tree.snapshot",
@@ -354,9 +394,19 @@
           "group": "inline@1"
         },
         {
+          "command": "dbtRunner.tree.snapshotAll",
+          "when": "view == dbtRunner.project && viewItem == section-snapshots",
+          "group": "inline@1"
+        },
+        {
           "command": "dbtRunner.tree.runTest",
           "when": "view == dbtRunner.project && viewItem == test",
           "group": "inline@1"
+        },
+        {
+          "command": "dbtRunner.showLineage",
+          "when": "view == dbtRunner.project && viewItem == model",
+          "group": "model@0"
         },
         {
           "command": "dbtRunner.compile",
@@ -372,6 +422,16 @@
           "command": "dbtRunner.generateYaml",
           "when": "view == dbtRunner.project && viewItem == model",
           "group": "model@3"
+        },
+        {
+          "command": "dbtRunner.tree.build",
+          "when": "view == dbtRunner.lineage && viewItem == lineage-model",
+          "group": "inline@1"
+        },
+        {
+          "command": "dbtRunner.tree.seed",
+          "when": "view == dbtRunner.lineage && viewItem == lineage-seed",
+          "group": "inline@1"
         }
       ]
     },
@@ -474,6 +534,11 @@
         {
           "id": "dbtRunner.project",
           "name": "Project",
+          "contextualTitle": "dbt"
+        },
+        {
+          "id": "dbtRunner.lineage",
+          "name": "Lineage",
           "contextualTitle": "dbt"
         }
       ]

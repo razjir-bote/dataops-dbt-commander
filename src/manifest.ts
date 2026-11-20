@@ -67,7 +67,33 @@ export interface NodeEntry {
   singular?: boolean;
 }
 
+export type NodeType = 'model' | 'seed' | 'snapshot' | 'source' | 'exposure' | 'test' | 'other';
+
+/** Any manifest node, source or exposure, for lineage. */
+export interface NodeInfo {
+  id: string;
+  name: string;
+  type: NodeType;
+  package: string;
+  file?: string;
+  /** Sources only. */
+  source?: string;
+  table?: string;
+}
+
+/** Upstream ('up') or downstream ('down') neighbours of a node, without tests, sorted by name. */
+export function relatives(index: ManifestIndex, id: string, dir: 'up' | 'down'): NodeInfo[] {
+  return ((dir === 'up' ? index.parents : index.children).get(id) ?? [])
+    .map(x => index.nodes.get(x))
+    .filter((n): n is NodeInfo => !!n && n.type !== 'test')
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
 export interface ManifestIndex {
+  /** Every node / source / exposure by unique_id. */
+  nodes: Map<string, NodeInfo>;
+  parents: Map<string, string[]>;
+  children: Map<string, string[]>;
   models: ModelEntry[];
   sources: SourceEntry[];
   macros: MacroEntry[];
@@ -228,7 +254,38 @@ export function parseManifest(
       patches.set(n.name, path.join(root, ...rel.split(/[\\/]/)));
     }
   }
-  return { models, sources, macros, seeds, snapshots, tests, patches };
+  // Lineage: every node / source / exposure, and dbt's own parent/child maps.
+  const nodes = new Map<string, NodeInfo>();
+  const typeOf = (t: unknown): NodeType =>
+    t === 'model' || t === 'seed' || t === 'snapshot' || t === 'test' ? t : t === 'unit_test' ? 'test' : 'other';
+  for (const [id, n] of Object.entries<any>(m.nodes ?? {})) {
+    if (n?.name) {
+      nodes.set(id, {
+        id,
+        name: n.name,
+        type: typeOf(n.resource_type),
+        package: n.package_name,
+        ...(n.original_file_path ? { file: fileFor(root, rootPackage, n.package_name, n.original_file_path) } : {})
+      });
+    }
+  }
+  for (const s of sources) {
+    nodes.set(s.uniqueId, { id: s.uniqueId, name: `${s.source}.${s.table}`, type: 'source', package: s.package, file: s.file, source: s.source, table: s.table });
+  }
+  for (const [id, e] of Object.entries<any>(m.exposures ?? {})) {
+    if (e?.name) {
+      nodes.set(id, {
+        id,
+        name: e.name,
+        type: 'exposure',
+        package: e.package_name,
+        ...(e.original_file_path ? { file: fileFor(root, rootPackage, e.package_name, e.original_file_path) } : {})
+      });
+    }
+  }
+  const asMap = (x: unknown) =>
+    new Map<string, string[]>(Object.entries<any>(x && typeof x === 'object' ? x : {}).filter(([, v]) => Array.isArray(v)));
+  return { models, sources, macros, seeds, snapshots, tests, patches, nodes, parents: asMap(m.parent_map), children: asMap(m.child_map) };
 }
 
 /**

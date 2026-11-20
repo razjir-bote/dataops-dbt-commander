@@ -26,6 +26,7 @@ import { Column, appendModel, hasModel, mergeColumns, newModelYaml, parseColumns
 import { cleanLine } from './errors';
 import { DbtItem, DbtSidebar } from './sidebar';
 import { DbtTests } from './testing';
+import { DbtLineage } from './lineage';
 
 let statusItem: vscode.StatusBarItem;
 let targetItem: vscode.StatusBarItem;
@@ -647,12 +648,14 @@ async function runNode(item: DbtItem | undefined, action: 'test' | 'snapshot'): 
   });
 }
 
+const treeTargets = (item: DbtItem): vscode.Uri[] | undefined => item.data?.targets?.map(t => vscode.Uri.file(t));
+
 async function projectRoots(): Promise<string[]> {
   const found = await vscode.workspace.findFiles('**/dbt_project.yml', '**/{dbt_packages,target,node_modules,.venv,venv,.vscode-test}/**', 50);
   return [...new Set(found.map(u => path.dirname(u.fsPath)))].sort();
 }
 
-export function activate(ctx: vscode.ExtensionContext): { sidebar: DbtSidebar; tests: DbtTests } {
+export function activate(ctx: vscode.ExtensionContext): { sidebar: DbtSidebar; tests: DbtTests; lineage: DbtLineage } {
   context = ctx;
   diagnostics = new DbtDiagnostics(vscode.languages.createDiagnosticCollection('dbt'));
 
@@ -719,12 +722,14 @@ export function activate(ctx: vscode.ExtensionContext): { sidebar: DbtSidebar; t
       await projectCommand(['parse'], 'parse', item?.root);
       sidebar.refresh();
     }),
-    vscode.commands.registerCommand('dbtRunner.tree.run', (item: DbtItem) => runDbt('run', 'none', item.resourceUri)),
-    vscode.commands.registerCommand('dbtRunner.tree.build', (item: DbtItem) => runDbt('build', 'none', item.resourceUri)),
-    vscode.commands.registerCommand('dbtRunner.tree.test', (item: DbtItem) => runDbt('test', 'none', item.resourceUri)),
-    vscode.commands.registerCommand('dbtRunner.tree.seed', (item: DbtItem) => seedFiles(item.resourceUri)),
+    // Section items carry their target folders (data.targets); everything else acts on its resourceUri.
+    vscode.commands.registerCommand('dbtRunner.tree.run', (item: DbtItem) => runDbt('run', 'none', item.resourceUri, treeTargets(item))),
+    vscode.commands.registerCommand('dbtRunner.tree.build', (item: DbtItem) => runDbt('build', 'none', item.resourceUri, treeTargets(item))),
+    vscode.commands.registerCommand('dbtRunner.tree.test', (item: DbtItem) => runDbt('test', 'none', item.resourceUri, treeTargets(item))),
+    vscode.commands.registerCommand('dbtRunner.tree.seed', (item: DbtItem) => seedFiles(item.resourceUri, treeTargets(item))),
     vscode.commands.registerCommand('dbtRunner.tree.snapshot', (item: DbtItem) => runNode(item, 'snapshot')),
-    vscode.commands.registerCommand('dbtRunner.tree.runTest', (item: DbtItem) => runNode(item, 'test'))
+    vscode.commands.registerCommand('dbtRunner.tree.runTest', (item: DbtItem) => runNode(item, 'test')),
+    vscode.commands.registerCommand('dbtRunner.tree.snapshotAll', (item: DbtItem) => projectCommand(['snapshot'], 'snapshot', item.root))
   );
 
   void refreshStatus();
@@ -739,7 +744,24 @@ export function activate(ctx: vscode.ExtensionContext): { sidebar: DbtSidebar; t
   ctx.subscriptions.push(tests);
   void tests.refresh();
 
-  return { sidebar, tests };
+  const lineage = new DbtLineage(languageDeps);
+  lineage.view = vscode.window.createTreeView('dbtRunner.lineage', { treeDataProvider: lineage });
+  ctx.subscriptions.push(
+    lineage,
+    lineage.view,
+    vscode.commands.registerCommand('dbtRunner.showLineage', async (target?: unknown) => {
+      const uri = asUri(target) ?? vscode.window.activeTextEditor?.document.uri;
+      if (!uri || !(await lineage.pin(uri))) {
+        void vscode.window.showInformationMessage('dbt Runner: open a model, seed or snapshot (and run dbt parse) to see its lineage.');
+        return;
+      }
+      await vscode.commands.executeCommand('dbtRunner.lineage.focus');
+    }),
+    vscode.commands.registerCommand('dbtRunner.lineage.followEditor', () => lineage.unpin())
+  );
+  void lineage.follow(vscode.window.activeTextEditor?.document.uri);
+
+  return { sidebar, tests, lineage };
 }
 
 export function deactivate(): void {}

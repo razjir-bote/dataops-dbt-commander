@@ -281,13 +281,15 @@ exports.run = async () => {
   await step('sidebar: sections, model folders, sources, seeds, tests', async () => {
     await vscode.commands.executeCommand('dbtRunner.parse'); // pick up the new YAML
     const top = await api.sidebar.getChildren();
-    assert.deepEqual(labels(top), ['Models', 'Sources', 'Seeds', 'Tests']);
+    assert.deepEqual(labels(top), ['Models', 'Sources', 'Seeds', 'Snapshots', 'Tests']);
     const models = await api.sidebar.getChildren(await child(top, 'Models'));
     assert.deepEqual(labels(models), ['staging', 'b', 'c']);
     assert.deepEqual(labels(await api.sidebar.getChildren(await child(models, 'staging'))), ['stg_a']);
     const sources = await api.sidebar.getChildren(await child(top, 'Sources'));
     assert.deepEqual(labels(await api.sidebar.getChildren(await child(sources, 'raw'))), ['customers', 'orders']);
-    assert.deepEqual(labels(await api.sidebar.getChildren(await child(top, 'Seeds'))), ['countries', 's']);
+    const seeds = await api.sidebar.getChildren(await child(top, 'Seeds'));
+    assert.deepEqual(labels(seeds), ['ref', 's']);
+    assert.deepEqual(labels(await api.sidebar.getChildren(await child(seeds, 'ref'))), ['countries']);
     const groups = await api.sidebar.getChildren(await child(top, 'Tests'));
     assert.deepEqual(labels(await api.sidebar.getChildren(await child(groups, 'b'))), ['not_null_b_id']);
   });
@@ -304,6 +306,69 @@ exports.run = async () => {
     await vscode.commands.executeCommand('dbtRunner.tree.runTest', tests[0]);
     assert.equal(results().length, 1);
     assert.match(results()[0], /^test\.demo\.not_null_b_id/);
+  });
+
+  // ----- v0.6: sidebar folders / sections, lineage -----
+
+  await step('sidebar: seed folder and section buttons run on everything inside', async () => {
+    const top = await api.sidebar.getChildren();
+    const seedsSection = await child(top, 'Seeds');
+    assert.equal(seedsSection.contextValue, 'section-seeds');
+    assert.ok(same(seedsSection.resourceUri.fsPath, file('seeds')));
+    const ref = await child(await api.sidebar.getChildren(seedsSection), 'ref');
+    assert.equal(ref.contextValue, 'seedFolder');
+    await vscode.commands.executeCommand('dbtRunner.tree.seed', ref);
+    assert.deepEqual(results(), ['seed.demo.countries']);
+    await vscode.commands.executeCommand('dbtRunner.tree.build', ref);
+    assert.deepEqual(results(), ['seed.demo.countries']);
+    await vscode.commands.executeCommand('dbtRunner.tree.seed', seedsSection);
+    assert.deepEqual(results(), ['seed.demo.countries', 'seed.demo.s']);
+    const models = await child(top, 'Models');
+    assert.equal(models.contextValue, 'section-models');
+    await vscode.commands.executeCommand('dbtRunner.tree.run', models);
+    assert.deepEqual(results(), ['model.demo.b', 'model.demo.c', 'model.demo.stg_a']);
+    const snaps = await child(top, 'Snapshots');
+    assert.equal(snaps.contextValue, 'section-snapshots');
+    await vscode.commands.executeCommand('dbtRunner.tree.snapshotAll', snaps);
+    assert.deepEqual(results(), ['snapshot.demo.snap']);
+  });
+
+  const lineageTree = async () => {
+    const [focus] = await api.lineage.getChildren();
+    assert.ok(focus, 'no lineage focus');
+    const [up, down] = await api.lineage.getChildren(focus);
+    return { focus, up, down, upKids: await api.lineage.getChildren(up), downKids: await api.lineage.getChildren(down) };
+  };
+
+  await step('lineage: follows the open model; upstream and downstream, clickable', async () => {
+    await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri('models', 'b.sql')));
+    await api.lineage.follow(uri('models', 'b.sql'));
+    const t = await lineageTree();
+    assert.equal(t.focus.label, 'b');
+    assert.deepEqual([t.up.label, t.down.label], ['Upstream', 'Downstream']);
+    assert.deepEqual(labels(t.upKids), ['stg_a']);
+    assert.deepEqual(labels(t.downKids), ['c', 'snap']);
+    const c = t.downKids[0];
+    assert.ok(same(c.command.arguments[0].fsPath, file('models', 'c.sql')));
+    assert.equal(c.contextValue, 'lineage-model');
+    const stg = t.upKids[0];
+    assert.equal(stg.collapsibleState, vscode.TreeItemCollapsibleState.None); // stg_a has no parents
+  });
+
+  await step('lineage: pin a model, ignore other editors, follow again', async () => {
+    await vscode.commands.executeCommand('dbtRunner.showLineage', uri('models', 'c.sql'));
+    assert.deepEqual([api.lineage.current.id, api.lineage.current.pinned], ['model.demo.c', true]);
+    await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri('models', 'staging', 'stg_a.sql')));
+    await api.lineage.follow(uri('models', 'staging', 'stg_a.sql'));
+    assert.equal(api.lineage.current.id, 'model.demo.c', 'pinned lineage followed the editor');
+    const t = await lineageTree();
+    assert.deepEqual(labels(t.upKids), ['b']);
+    const bUp = await api.lineage.getChildren(t.upKids[0]);
+    assert.deepEqual(labels(bUp), ['stg_a'], 'expanding b upstream');
+    await vscode.commands.executeCommand('dbtRunner.lineage.followEditor');
+    assert.deepEqual([api.lineage.current.id, api.lineage.current.pinned], ['model.demo.stg_a', false]);
+    await api.lineage.follow(uri('macros', 'money.sql')); // not a node: keeps the current one
+    assert.equal(api.lineage.current.id, 'model.demo.stg_a');
   });
 
   // ----- v0.5: Testing panel, hovers -----
