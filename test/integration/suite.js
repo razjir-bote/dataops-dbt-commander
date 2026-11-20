@@ -1064,5 +1064,35 @@ exports.run = async () => {
     }
   });
 
+  await step('Show lineage on an exposure or a source (sidebar) and on a Lineage panel item', async () => {
+    const ex = file('models', 'zz_exposures2.yml');
+    fs.writeFileSync(ex, "version: 2\nexposures:\n  - name: dash2\n    type: dashboard\n    owner:\n      name: me\n    depends_on:\n      - ref('c')\n");
+    try {
+      await vscode.commands.executeCommand('dbtCommander.parse');
+      const top = await api.sidebar.getChildren();
+      const [dash] = await api.sidebar.getChildren(await child(top, 'Exposures'));
+      await vscode.commands.executeCommand('dbtCommander.showLineage', dash);
+      assert.deepEqual([api.lineage.current.id, api.lineage.current.pinned], ['exposure.demo.dash2', true]);
+      const [focus] = await api.lineage.getChildren();
+      const [up, down] = await api.lineage.getChildren(focus);
+      assert.deepEqual(labels(await api.lineage.getChildren(up)), ['c']);
+      assert.equal(down.description, 'none');
+
+      // Re-centre on an item listed in the panel (c, upstream of the exposure).
+      const [c] = await api.lineage.getChildren(up);
+      await vscode.commands.executeCommand('dbtCommander.showLineage', c);
+      assert.equal(api.lineage.current.id, 'model.demo.c');
+
+      const raw = await child(await api.sidebar.getChildren(await child(top, 'Sources')), 'raw');
+      const orders = await child(await api.sidebar.getChildren(raw), 'orders');
+      await vscode.commands.executeCommand('dbtCommander.showLineage', orders);
+      assert.equal(api.lineage.current.id, 'source.demo.raw.orders');
+    } finally {
+      await api.lineage.unpin();
+      fs.rmSync(ex, { force: true });
+      await vscode.commands.executeCommand('dbtCommander.parse');
+    }
+  });
+
   fs.writeFileSync(process.env.ITEST_OUT, out.join('\n'));
 };

@@ -550,7 +550,7 @@
         },
         {
           "command": "dbtCommander.showLineage",
-          "when": "view == dbtCommander.project && viewItem == model",
+          "when": "view == dbtCommander.project && viewItem =~ /^(model|seed|snapshot|sourceTable|exposure|semanticModel)$/",
           "group": "model@0"
         },
         {
@@ -652,6 +652,11 @@
           "command": "dbtCommander.createStaging",
           "when": "view == dbtCommander.lineage && viewItem =~ /^lineage-source/",
           "group": "docs@2"
+        },
+        {
+          "command": "dbtCommander.showLineage",
+          "when": "view == dbtCommander.lineage && viewItem =~ /^lineage-/",
+          "group": "docs@0"
         }
       ],
       "editor/context": [

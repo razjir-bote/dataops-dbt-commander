@@ -1,7 +1,7 @@
 # DataOps dbt Commander — developer handover
 
 Keep this file current: update it in the same commit as any change to features, architecture, build/release
-process, or known issues. Last updated: 2026-11-21 (v0.11.1 released).
+process, or known issues. Last updated: 2026-11-21 (v0.11.1 released; Show lineage on any node committed after it).
 
 ## What this is
 A VS Code extension (TypeScript) for working with **dbt-core 1.x** (tested with 1.12.7) on **Windows**, running
@@ -14,6 +14,9 @@ Since v0.9.0 the extension ID is `local.dataops-dbt-commander` and every command
 is `dbtCommander.*`; `migrate.ts` copies old `dbtRunner.*` user and workspace settings once on activation.
 
 ## Status
+- **After v0.11.1 (unreleased):** *Show lineage* centres the Lineage panel on any manifest node —
+  `DbtLineage.pinNode(root, id)`, used for sidebar source tables / exposures / semantic models (their `DbtItem.data.uniqueId`)
+  and for Lineage panel items (re-centre). Files still follow the editor only for models / seeds / snapshots.
 - **v0.11.0 — released** (https://github.com/razjir-bote/dataops-dbt-commander/releases/tag/v0.11.0): preview table sort / filter / Copy (TSV) /
   Save CSV (`exportrows.ts`; the webview runs `viewRows.toString()`, so the function must stay self-contained;
   Copy / Save recompute from the view state in the extension), column profile (`profile.ts`: one inline query with
@@ -77,7 +80,7 @@ npm run package              # esbuild → dist/extension.js, then vsce → .vsi
 - **Integration suite** (`test/integration/run.js` + `suite.js`): copies `test/fixtures/demo` to
   `.vscode-test/work/demo`, creates `.vscode-test/dbt-venv` (dbt-core~=1.12.0 + dbt-duckdb) on first run
   (`DBT_PYTHON` picks the Python; default `py -3.12` on Windows), launches VS Code with the extension and prints
-  `PASS`/`FAIL` lines; exits 1 on any FAIL. ~4–5 min. Currently 65 checks; the v0.10 ones are last because they add a
+  `PASS`/`FAIL` lines; exits 1 on any FAIL. ~4–5 min. Currently 66 checks; the v0.10 ones are last because they add a
   temporary model and feed a fake run_results file to the run-state store (which then is "the last run"). The suite talks to the extension
   through the API returned by `activate()` (`sidebar`, `tests`, `lineage`, `runStatus`, `projectEdits`, `query`, …).
 - **CI** (`.github/workflows/ci.yml`): windows-latest, Node 22, Python 3.12; typecheck, unit, integration,

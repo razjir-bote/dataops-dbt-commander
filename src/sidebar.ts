@@ -29,7 +29,7 @@ export class DbtItem extends vscode.TreeItem {
     readonly kind: ItemKind,
     readonly root: string,
     collapsible: vscode.TreeItemCollapsibleState,
-    readonly data: { section?: Section; dir?: string; source?: string; model?: string; name?: string; targets?: string[] } = {}
+    readonly data: { section?: Section; dir?: string; source?: string; model?: string; name?: string; targets?: string[]; uniqueId?: string } = {}
   ) {
     super(label, collapsible);
     this.contextValue = kind;
@@ -260,7 +260,7 @@ export class DbtSidebar implements vscode.TreeDataProvider<DbtItem>, vscode.Disp
       .filter(s => s.source === source && s.package === this.rootPackage(root))
       .sort((a, b) => a.table.localeCompare(b.table))
       .map(s => {
-        const it = new DbtItem(s.table, 'sourceTable', root, None, { source, name: s.table });
+        const it = new DbtItem(s.table, 'sourceTable', root, None, { source, name: s.table, uniqueId: s.uniqueId });
         it.iconPath = new vscode.ThemeIcon('symbol-field');
         let line = 0;
         try {
@@ -278,7 +278,7 @@ export class DbtSidebar implements vscode.TreeDataProvider<DbtItem>, vscode.Disp
     return [...nodes]
       .sort((a, b) => a.name.localeCompare(b.name))
       .map(n => {
-        const it = new DbtItem(n.name, kind, root, None, { name: n.name });
+        const it = new DbtItem(n.name, kind, root, None, { name: n.name, uniqueId: n.uniqueId });
         it.description = this.badge(root, n.uniqueId);
         it.resourceUri = vscode.Uri.file(n.file);
         it.iconPath = new vscode.ThemeIcon(icon);

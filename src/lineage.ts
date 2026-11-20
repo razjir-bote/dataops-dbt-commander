@@ -67,7 +67,7 @@ function nodeIdForFile(index: ManifestIndex, file: string): string | undefined {
   return map.get(file.toLowerCase());
 }
 
-/** Upstream / downstream of the open (or pinned) model, expandable level by level. */
+/** Upstream / downstream of the open model, or of a pinned node (any type), expandable level by level. */
 export class DbtLineage implements vscode.TreeDataProvider<LineageItem>, vscode.Disposable {
   private readonly changed = new vscode.EventEmitter<LineageItem | undefined>();
   readonly onDidChangeTreeData = this.changed.event;
@@ -134,6 +134,21 @@ export class DbtLineage implements vscode.TreeDataProvider<LineageItem>, vscode.
       return false;
     }
     this.focus = found;
+    this.pinned = true;
+    this.refresh();
+    return true;
+  }
+
+  /**
+   * Show lineage for any node in the manifest — a source, an exposure, a semantic model, or a node listed in this
+   * panel — and keep it. False when the node isn't in the project's manifest.
+   */
+  async pinNode(root: string, id: string): Promise<boolean> {
+    const index = await loadManifest(this.deps, root);
+    if (!index?.nodes.has(id)) {
+      return false;
+    }
+    this.focus = { root, id };
     this.pinned = true;
     this.refresh();
     return true;

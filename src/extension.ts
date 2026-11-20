@@ -1078,9 +1078,15 @@ export function activate(ctx: vscode.ExtensionContext): DbtRunnerApi {
     lineage,
     lineage.view,
     vscode.commands.registerCommand('dbtCommander.showLineage', async (target?: unknown) => {
+      // Sidebar sources / exposures / semantic models carry their unique_id; Lineage panel items their node.
+      const t = target as { root?: unknown; node?: { id?: unknown }; data?: { uniqueId?: unknown } } | undefined;
+      const id = typeof t?.node?.id === 'string' ? t.node.id : typeof t?.data?.uniqueId === 'string' ? t.data.uniqueId : undefined;
       const uri = asUri(target) ?? vscode.window.activeTextEditor?.document.uri;
-      if (!uri || !(await lineage.pin(uri))) {
-        void vscode.window.showInformationMessage('dbt Commander: open a model, seed or snapshot (and run dbt parse) to see its lineage.');
+      const shown = id && typeof t?.root === 'string' ? await lineage.pinNode(t.root, id) : !!uri && (await lineage.pin(uri));
+      if (!shown) {
+        void vscode.window.showInformationMessage(
+          'dbt Commander: open a model, seed or snapshot, or pick a source or exposure in the dbt sidebar (and run dbt parse), to see its lineage.'
+        );
         return;
       }
       await vscode.commands.executeCommand('dbtCommander.lineage.focus');

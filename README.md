@@ -48,7 +48,9 @@ Supports dbt-core 1.x (tested with 1.12); not dbt 2 / Fusion.
   also offers **Build + Upstream / + Downstream / + Upstream & Downstream** for the selection (folders included).
 - **Lineage** — a view under Project shows the open model's **upstream** (models, seeds, snapshots, sources) and
   **downstream** (models, snapshots, exposures), each expandable level by level; click to open, Build on models.
-  It follows the active editor; *Show lineage* pins it to a model until you press *Follow active editor*.
+  It follows the active editor; *Show lineage* pins it to a node until you press *Follow active editor* — on a
+  model, seed, snapshot, **source table, exposure or semantic model** in the dbt sidebar (to see what an exposure
+  depends on), or on any item in the Lineage panel to re-centre on it.
 
 - **dbt tests in the Testing panel** — every dbt test appears in VS Code's Testing view, grouped by model / source,
   with run buttons, Run All, Rerun Failed, pass/fail icons next to each test in your YAML, and dbt's failure
