@@ -1094,5 +1094,62 @@ exports.run = async () => {
     }
   });
 
+  // ----- v0.12: optional SQLFluff -----
+
+  const sqlfluffProblems = u => vscode.languages.getDiagnostics(u).filter(d => d.source === 'sqlfluff');
+
+  await step('SQLFluff is off by default: nothing runs, nothing registered', async () => {
+    assert.equal(cfg().get('sqlfluff.enabled'), 'off');
+    assert.equal(api.sqlfluff.active, false);
+    const doc = await vscode.workspace.openTextDocument(uri('models', 'c.sql'));
+    await vscode.window.showTextDocument(doc);
+    await sleep(1500);
+    assert.deepEqual(sqlfluffProblems(doc.uri), []);
+    const edits = await vscode.commands.executeCommand('vscode.executeFormatDocumentProvider', doc.uri, { tabSize: 4, insertSpaces: true });
+    assert.ok(!edits || edits.length === 0, 'a formatter ran while SQLFluff is off');
+    await closeAll();
+  });
+
+  await step('SQLFluff on: problems (dialect from the dbt adapter), Format Document, fix on save, then off clears all', async () => {
+    const f = file('models', 'zz_lint.sql');
+    const messy = "SELECT a,b from {{ ref('b') }}\n";
+    fs.writeFileSync(f, messy);
+    try {
+      await cfg().update('sqlfluff.enabled', 'on', vscode.ConfigurationTarget.Workspace);
+      await waitFor('sqlfluff active', () => api.sqlfluff.active);
+      const doc = await vscode.workspace.openTextDocument(f);
+      await vscode.window.showTextDocument(doc);
+      const problems = await waitFor('sqlfluff problems', () => (sqlfluffProblems(doc.uri).length ? sqlfluffProblems(doc.uri) : undefined), 60000);
+      assert.ok(problems.some(p => /^LT\d\d/.test(String(p.code))), problems.map(p => p.code).join(', '));
+
+      const edits = await vscode.commands.executeCommand('vscode.executeFormatDocumentProvider', doc.uri, { tabSize: 4, insertSpaces: true });
+      // VS Code turns the provider's whole-file replacement into minimal edits: check the result, not the count.
+      assert.ok(edits && edits.length > 0, 'Format Document gave no edit: ' + JSON.stringify(edits));
+      const formatted = await vscode.workspace.openTextDocument({ language: 'sql', content: doc.getText() });
+      const p2 = new vscode.WorkspaceEdit();
+      p2.set(formatted.uri, edits);
+      assert.ok(await vscode.workspace.applyEdit(p2));
+      assert.match(formatted.getText(), /SELECT\r?\n\s+a,\r?\n\s+b\r?\n/i, formatted.getText());
+
+      await cfg().update('sqlfluff.fixOnSave', true, vscode.ConfigurationTarget.Workspace);
+      const ed = await vscode.window.showTextDocument(doc);
+      await ed.edit(e => e.insert(new vscode.Position(0, 0), '-- touched\n'));
+      await doc.save();
+      const saved = fs.readFileSync(f, 'utf8');
+      assert.notEqual(saved.replace(/\r\n/g, '\n'), '-- touched\n' + messy, 'fix on save changed nothing');
+      assert.match(saved, /SELECT\r?\n\s+a,\r?\n\s+b\r?\n/i, saved);
+      assert.ok(!/\r\n/.test(saved) || /\r\n/.test(doc.getText()), 'line endings changed');
+
+      await cfg().update('sqlfluff.enabled', 'off', vscode.ConfigurationTarget.Workspace);
+      await waitFor('sqlfluff off', () => !api.sqlfluff.active);
+      await waitFor('problems cleared', () => sqlfluffProblems(doc.uri).length === 0);
+    } finally {
+      await cfg().update('sqlfluff.enabled', undefined, vscode.ConfigurationTarget.Workspace);
+      await cfg().update('sqlfluff.fixOnSave', undefined, vscode.ConfigurationTarget.Workspace);
+      await closeAll();
+      fs.rmSync(f, { force: true });
+    }
+  });
+
   fs.writeFileSync(process.env.ITEST_OUT, out.join('\n'));
 };

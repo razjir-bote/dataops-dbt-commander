@@ -244,6 +244,16 @@
         "command": "dbtCommander.profileColumn",
         "title": "Profile column",
         "category": "dbt Commander"
+      },
+      {
+        "command": "dbtCommander.sqlfluff.lint",
+        "title": "SQLFluff: Lint file",
+        "category": "dbt Commander"
+      },
+      {
+        "command": "dbtCommander.sqlfluff.fix",
+        "title": "SQLFluff: Fix file",
+        "category": "dbt Commander"
       }
     ],
     "submenus": [
@@ -478,6 +488,14 @@
         {
           "command": "dbtCommander.profileColumn",
           "when": "false"
+        },
+        {
+          "command": "dbtCommander.sqlfluff.lint",
+          "when": "dbtCommander.sqlfluffActive && editorIsOpen && resourceScheme == file && resourceExtname =~ /^\\.sql$/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
+        },
+        {
+          "command": "dbtCommander.sqlfluff.fix",
+          "when": "dbtCommander.sqlfluffActive && editorIsOpen && resourceScheme == file && resourceExtname =~ /^\\.sql$/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
         }
       ],
       "view/title": [
@@ -664,6 +682,16 @@
           "command": "dbtCommander.previewSelection",
           "when": "dbtCommander.isScratchpad || (resourceScheme == file && resourceExtname =~ /^\\.sql$/i && (resourcePath =~ /[\\\\/]models([\\\\/]|$)/i || resourcePath in dbtCommander.modelPaths) && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i)",
           "group": "dbt@1"
+        },
+        {
+          "command": "dbtCommander.sqlfluff.lint",
+          "when": "dbtCommander.sqlfluffActive && resourceScheme == file && resourceExtname =~ /^\\.sql$/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i",
+          "group": "dbt@2"
+        },
+        {
+          "command": "dbtCommander.sqlfluff.fix",
+          "when": "dbtCommander.sqlfluffActive && resourceScheme == file && resourceExtname =~ /^\\.sql$/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i",
+          "group": "dbt@3"
         }
       ]
     },
@@ -711,6 +739,36 @@
           "type": "string",
           "default": "",
           "description": "Optional template file for \"dbt New model…\" (relative to the dbt project or absolute). {{name}} is replaced with the model name."
+        },
+        "dbtCommander.sqlfluff.enabled": {
+          "type": "string",
+          "enum": [
+            "off",
+            "on",
+            "auto"
+          ],
+          "enumDescriptions": [
+            "No SQLFluff features at all; SQLFluff is never started.",
+            "Lint dbt SQL files with the SQLFluff in the dbt venv; warn if it is not installed.",
+            "Lint when the dbt venv has SQLFluff; stay silent otherwise."
+          ],
+          "default": "off",
+          "description": "SQLFluff linting of dbt SQL files (problems on open / save, Format Document, fix on save). Off by default."
+        },
+        "dbtCommander.sqlfluff.fixOnSave": {
+          "type": "boolean",
+          "default": false,
+          "description": "When SQLFluff linting is on: run `sqlfluff fix` on manual saves (one undo step). Auto-saves are left alone."
+        },
+        "dbtCommander.sqlfluff.dialect": {
+          "type": "string",
+          "default": "",
+          "description": "SQLFluff dialect (e.g. tsql). Empty: the project's SQLFluff config, else the dbt adapter's dialect."
+        },
+        "dbtCommander.sqlfluff.extraArgs": {
+          "type": "string",
+          "default": "",
+          "description": "Extra flags for every SQLFluff run, e.g. `--rules LT01,LT02` or `--templater dbt`."
         }
       }
     },

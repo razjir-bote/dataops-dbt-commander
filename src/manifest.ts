@@ -108,6 +108,8 @@ export interface ManifestIndex {
   semanticModels: NodeEntry[];
   /** Root-project model name → the YAML file that already describes it (`patch_path`). */
   patches: Map<string, string>;
+  /** dbt adapter of the project (`metadata.adapter_type`, e.g. synapse, duckdb). */
+  adapterType?: string;
 }
 
 /** A node's file: in the project, or in its package's folder under packages-install-path. */
@@ -317,6 +319,7 @@ export function parseManifest(
     new Map<string, string[]>(Object.entries<any>(x && typeof x === 'object' ? x : {}).filter(([, v]) => Array.isArray(v)));
   return {
     models, sources, macros, seeds, snapshots, tests, exposures, semanticModels, patches, nodes,
+    ...(typeof m.metadata?.adapter_type === 'string' ? { adapterType: m.metadata.adapter_type } : {}),
     parents: asMap(m.parent_map), children: asMap(m.child_map)
   };
 }

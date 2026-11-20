@@ -13,6 +13,7 @@ const results = path.join(cache, 'results.txt');
 const isWin = process.platform === 'win32';
 const venvPython = path.join(venv, isWin ? 'Scripts' : 'bin', isWin ? 'python.exe' : 'python');
 const dbtExe = path.join(venv, isWin ? 'Scripts' : 'bin', isWin ? 'dbt.exe' : 'dbt');
+const sqlfluffExe = path.join(venv, isWin ? 'Scripts' : 'bin', isWin ? 'sqlfluff.exe' : 'sqlfluff');
 
 function basePython() {
   if (process.env.DBT_PYTHON) return [process.env.DBT_PYTHON];
@@ -27,21 +28,34 @@ function basePython() {
   return [isWin ? 'python' : 'python3'];
 }
 
+// SQLFluff for the optional linting checks (also added to a venv cached before it was needed).
+function ensureSqlfluff() {
+  if (!fs.existsSync(sqlfluffExe)) {
+    execFileSync(venvPython, ['-m', 'pip', 'install', '--quiet', 'sqlfluff>=3,<5'], { stdio: 'inherit' });
+  }
+}
+
 function ensureVenv() {
   if (fs.existsSync(dbtExe)) {
+    let works = false;
     try {
       execFileSync(dbtExe, ['--version'], { stdio: 'ignore' });
-      return;
+      works = true;
     } catch {
       // e.g. a cached venv whose base Python moved: rebuild it
       console.log('Cached dbt venv is broken; rebuilding ...');
       fs.rmSync(venv, { recursive: true, force: true });
+    }
+    if (works) {
+      ensureSqlfluff(); // outside the try: a pip failure must not wipe a working dbt venv
+      return;
     }
   }
   const [py, ...pyArgs] = basePython();
   console.log(`Creating dbt venv with ${py} ${pyArgs.join(' ')} ...`);
   execFileSync(py, [...pyArgs, '-m', 'venv', venv], { stdio: 'inherit' });
   execFileSync(venvPython, ['-m', 'pip', 'install', '--quiet', 'dbt-core~=1.12.0', 'dbt-duckdb'], { stdio: 'inherit' });
+  ensureSqlfluff();
 }
 
 function freshProject() {

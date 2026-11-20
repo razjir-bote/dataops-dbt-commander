@@ -1,7 +1,7 @@
 # DataOps dbt Commander — developer handover
 
 Keep this file current: update it in the same commit as any change to features, architecture, build/release
-process, or known issues. Last updated: 2026-11-21 (v0.11.1 released; Show lineage on any node committed after it).
+process, or known issues. Last updated: 2026-11-21 (v0.11.1 released; Show lineage on any node and optional SQLFluff after it).
 
 ## What this is
 A VS Code extension (TypeScript) for working with **dbt-core 1.x** (tested with 1.12.7) on **Windows**, running
@@ -14,6 +14,23 @@ Since v0.9.0 the extension ID is `local.dataops-dbt-commander` and every command
 is `dbtCommander.*`; `migrate.ts` copies old `dbtRunner.*` user and workspace settings once on activation.
 
 ## Status
+- **v0.12 (unreleased, version still 0.11.1): optional SQLFluff**, off by default (`dbtCommander.sqlfluff.enabled`
+  off / on / auto). `sqlfluff.ts` (pure: JSON parsing, dialect from adapter, config detection, args, CRLF→file EOL)
+  and `sqlfluffRunner.ts` (stdin runs with `--stdin-filename`, so `.sqlfluff` / `.sqlfluffignore` apply; problems on
+  open / save; fix on manual save via `onWillSaveTextDocument` + `waitUntil`; a formatter registered only while active;
+  context key `dbtCommander.sqlfluffActive` for menus). Off: no formatter, problems cleared, SQLFluff never spawned.
+  Settings page has a SQLFluff section. Gotchas: SQLFluff 4 on Windows writes CRLF to stdout and crashes printing
+  emoji unless `PYTHONIOENCODING=utf-8`. The integration venv installs `sqlfluff>=3,<5`.
+  Design: `docs/superpowers/specs/2026-11-21-dbt-commander-v0.12-sqlfluff-design.md`.
+  From the review: VS Code drops a will-save participant's edits after 1.5 s (and ignores it after a few misses), so
+  fix on save races 1.2 s and applies a slower fix right after the save, then saves again (only if the text is
+  unchanged); lints are queued per file (one running + one pending, 2 SQLFluff processes at most), settings changes
+  are debounced, runs are killed when turned off; `fix` output is used only for exit 0 / 1 and not when killed; the
+  dialect check reads the same folders SQLFluff does (file folder up, home, user config dir), cached by mtime; the
+  settings page stores off / false as "not set" and never starts SQLFluff while off. Not done (minor): SQLFluff
+  counts columns in code points, VS Code in UTF-16 units (an emoji shifts ranges on its line); with fix on save and
+  `editor.formatOnSave` both on, SQLFluff runs twice per save; the formatter is registered for every `.sql` file
+  (returns nothing outside dbt folders).
 - **After v0.11.1 (unreleased):** *Show lineage* centres the Lineage panel on any manifest node —
   `DbtLineage.pinNode(root, id)`, used for sidebar source tables / exposures / semantic models (their `DbtItem.data.uniqueId`)
   and for Lineage panel items (re-centre). Files still follow the editor only for models / seeds / snapshots.
@@ -80,7 +97,7 @@ npm run package              # esbuild → dist/extension.js, then vsce → .vsi
 - **Integration suite** (`test/integration/run.js` + `suite.js`): copies `test/fixtures/demo` to
   `.vscode-test/work/demo`, creates `.vscode-test/dbt-venv` (dbt-core~=1.12.0 + dbt-duckdb) on first run
   (`DBT_PYTHON` picks the Python; default `py -3.12` on Windows), launches VS Code with the extension and prints
-  `PASS`/`FAIL` lines; exits 1 on any FAIL. ~4–5 min. Currently 66 checks; the v0.10 ones are last because they add a
+  `PASS`/`FAIL` lines; exits 1 on any FAIL. ~4–5 min. Currently 68 checks; the v0.10 ones are last because they add a
   temporary model and feed a fake run_results file to the run-state store (which then is "the last run"). The suite talks to the extension
   through the API returned by `activate()` (`sidebar`, `tests`, `lineage`, `runStatus`, `projectEdits`, `query`, …).
 - **CI** (`.github/workflows/ci.yml`): windows-latest, Node 22, Python 3.12; typecheck, unit, integration,
@@ -118,6 +135,7 @@ npm run package              # esbuild → dist/extension.js, then vsce → .vsi
 | `testing.ts` | Testing panel controller; runs `dbt test`, maps run_results; snapshot-based runs |
 | `settingsPanel.ts` | settings webview (venv, target, extra flags) |
 | `query.ts` | `runShow` (shared by Preview Data), scratchpads, preview selection / CTE, YAML quick-fix code actions |
+| `sqlfluff.ts` / `sqlfluffRunner.ts` | pure SQLFluff helpers / optional linting, fix on save, formatter, commands |
 | `exportrows.ts` / `profile.ts` | pure: preview sort / filter / CSV / TSV / profile query + display rows |
 | `scratch.ts` / `yamlfix.ts` / `macrohover.ts` | pure: CTE parser + inline SQL / column test insertions / macro signature + hover text |
 

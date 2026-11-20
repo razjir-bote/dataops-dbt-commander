@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import { execFile } from 'child_process';
 import { dbtExecutable, parseDbtVersion } from './dbt';
+import { parseSqlfluffVersion, sqlfluffExecutable } from './sqlfluff';
 
 export interface DbtVersionInfo {
   exe?: string;
@@ -25,6 +26,26 @@ export function detectDbtVersion(venvPath: string): Promise<DbtVersionInfo> {
       } else {
         resolve({ exe, error: err ? `Failed to run dbt --version: ${err.message}` : 'Could not read the dbt version.' });
       }
+    });
+  });
+}
+
+/**
+ * SQLFluff in the venv, if any: its version, or why not. With `start` false (linting off) SQLFluff is not run —
+ * only its executable is looked for.
+ */
+export function detectSqlfluff(venvPath: string, start = true): Promise<{ version?: string; found?: boolean; error?: string }> {
+  const exe = sqlfluffExecutable(venvPath, p => fs.existsSync(p));
+  if (!exe) {
+    return Promise.resolve({ error: 'SQLFluff is not installed in this venv (pip install sqlfluff).' });
+  }
+  if (!start) {
+    return Promise.resolve({ found: true });
+  }
+  return new Promise(resolve => {
+    execFile(exe, ['--version'], { timeout: 30000, windowsHide: true, env: { ...process.env, PYTHONIOENCODING: 'utf-8' } }, (err, stdout, stderr) => {
+      const version = parseSqlfluffVersion(`${stdout}\n${stderr}`);
+      resolve(version ? { version } : { error: err ? `Failed to run sqlfluff --version: ${err.message}` : 'Could not read the SQLFluff version.' });
     });
   });
 }
@@ -73,7 +94,12 @@ export class SettingsPanel {
 
   private async check(venvPath: string): Promise<void> {
     this.post({ type: 'checking' });
-    this.post({ type: 'version', info: await detectDbtVersion(venvPath) });
+    // Separately: the dbt line shouldn't wait for SQLFluff. With linting off, SQLFluff is never started.
+    const start = vscode.workspace.getConfiguration('dbtCommander').get<string>('sqlfluff.enabled', 'off') !== 'off';
+    await Promise.all([
+      detectDbtVersion(venvPath).then(info => this.post({ type: 'version', info })),
+      detectSqlfluff(venvPath, start).then(info => this.post({ type: 'sqlfluffVersion', info }))
+    ]);
   }
 
   /** `soft`: the panel was reopened; the webview keeps unsaved edits instead of overwriting them. */
@@ -82,7 +108,11 @@ export class SettingsPanel {
     const state = {
       venvPath: cfg.get<string>('venvPath', ''),
       target: cfg.get<string>('target', ''),
-      extraArgs: cfg.get<string>('extraArgs', '')
+      extraArgs: cfg.get<string>('extraArgs', ''),
+      sqlfluffEnabled: cfg.get<string>('sqlfluff.enabled', 'off'),
+      sqlfluffFixOnSave: cfg.get<boolean>('sqlfluff.fixOnSave', false),
+      sqlfluffDialect: cfg.get<string>('sqlfluff.dialect', ''),
+      sqlfluffExtraArgs: cfg.get<string>('sqlfluff.extraArgs', '')
     };
     this.post({ type: 'state', state, soft });
     this.post({ type: 'targets', targets: this.getTargets() });
@@ -120,6 +150,12 @@ export class SettingsPanel {
           await cfg.update('venvPath', value(msg.venvPath), target);
           await cfg.update('target', value(msg.target), target);
           await cfg.update('extraArgs', value(msg.extraArgs), target);
+          const mode = ['off', 'on', 'auto'].includes(msg.sqlfluffEnabled) ? msg.sqlfluffEnabled : 'off';
+          // Defaults are stored as "not set", so a User-level SQLFluff setting still applies.
+          await cfg.update('sqlfluff.enabled', mode === 'off' ? undefined : mode, target);
+          await cfg.update('sqlfluff.fixOnSave', msg.sqlfluffFixOnSave === true ? true : undefined, target);
+          await cfg.update('sqlfluff.dialect', value(msg.sqlfluffDialect), target);
+          await cfg.update('sqlfluff.extraArgs', value(msg.sqlfluffExtraArgs), target);
         } catch (err) {
           this.post({ type: 'saveError', message: err instanceof Error ? err.message : String(err) });
           break;
@@ -174,6 +210,10 @@ export class SettingsPanel {
   .actions { display: flex; align-items: center; gap: 12px; margin-top: 28px; }
   #status { color: var(--vscode-descriptionForeground); }
   #status.error { color: var(--vscode-errorForeground); }
+  h2 { font-size: 1.1em; font-weight: 600; margin: 32px 0 4px; padding-top: 16px; border-top: 1px solid var(--vscode-panel-border, rgba(128,128,128,.3)); }
+  select { padding: 4px 6px; color: var(--vscode-dropdown-foreground); background: var(--vscode-dropdown-background); border: 1px solid var(--vscode-dropdown-border, transparent); font-family: inherit; font-size: inherit; }
+  .check { display: flex; align-items: center; gap: 8px; font-weight: normal; }
+  .off { opacity: .5; }
 </style>
 </head>
 <body>
@@ -207,6 +247,42 @@ export class SettingsPanel {
     <div class="hint">Appended to every run / build / test, separated by spaces.</div>
   </div>
 
+  <h2>SQLFluff linting</h2>
+  <p class="sub">Lint dbt SQL files with the SQLFluff installed in the venv above. Off by default.</p>
+
+  <div class="field">
+    <label>Detected SQLFluff</label>
+    <div id="sfVersion" class="version">Checking…</div>
+  </div>
+
+  <div class="field">
+    <label for="sfEnabled">Linting</label>
+    <select id="sfEnabled">
+      <option value="off">Off — no SQLFluff features at all</option>
+      <option value="on">On</option>
+      <option value="auto">Auto — when the venv has SQLFluff</option>
+    </select>
+    <div class="hint">Problems on open and save, <em>Format Document</em>, and the SQLFluff commands. Off never starts SQLFluff.</div>
+  </div>
+
+  <div id="sfOptions">
+    <div class="field">
+      <label class="check"><input id="sfFix" type="checkbox" style="flex:none;width:auto"> Fix on save</label>
+      <div class="hint">Runs <code>sqlfluff fix</code> when you save a file yourself (not on auto-save). One undo step.</div>
+    </div>
+
+    <div class="field">
+      <label for="sfDialect">Dialect</label>
+      <input id="sfDialect" type="text" placeholder="(from .sqlfluff, else the dbt adapter)" spellcheck="false">
+      <div class="hint">e.g. <code>tsql</code> for Synapse / SQL Server. Leave blank to use your SQLFluff config or the dbt adapter.</div>
+    </div>
+
+    <div class="field">
+      <label for="sfExtra">SQLFluff extra flags</label>
+      <input id="sfExtra" type="text" placeholder="e.g. --templater dbt" spellcheck="false">
+    </div>
+  </div>
+
   <div class="actions">
     <button id="save">Save</button>
     <span id="status"></span>
@@ -216,6 +292,13 @@ export class SettingsPanel {
   const vscode = acquireVsCodeApi();
   const $ = id => document.getElementById(id);
   const venv = $('venv'), target = $('target'), extra = $('extra'), version = $('version'), status = $('status');
+  const sfEnabled = $('sfEnabled'), sfFix = $('sfFix'), sfDialect = $('sfDialect'), sfExtra = $('sfExtra'), sfVersion = $('sfVersion');
+  // Off: the SQLFluff options don't apply — grey them out.
+  function syncSqlfluff() {
+    const off = sfEnabled.value === 'off';
+    [sfFix, sfDialect, sfExtra].forEach(el => (el.disabled = off));
+    $('sfOptions').classList.toggle('off', off);
+  }
   let timer;
   let dirty = false; // unsaved edits in the form
 
@@ -228,9 +311,11 @@ export class SettingsPanel {
     clearTimeout(timer);
     timer = setTimeout(() => vscode.postMessage({ type: 'check', venvPath: venv.value }), 500);
   });
-  [target, extra].forEach(el => el.addEventListener('input', () => { dirty = true; status.textContent = ''; }));
+  [target, extra, sfDialect, sfExtra].forEach(el => el.addEventListener('input', () => { dirty = true; status.textContent = ''; }));
+  [sfEnabled, sfFix].forEach(el => el.addEventListener('change', () => { dirty = true; status.textContent = ''; syncSqlfluff(); }));
   $('save').addEventListener('click', () => vscode.postMessage({
-    type: 'save', venvPath: venv.value, target: target.value, extraArgs: extra.value
+    type: 'save', venvPath: venv.value, target: target.value, extraArgs: extra.value,
+    sqlfluffEnabled: sfEnabled.value, sqlfluffFixOnSave: sfFix.checked, sqlfluffDialect: sfDialect.value, sqlfluffExtraArgs: sfExtra.value
   }));
 
   window.addEventListener('message', e => {
@@ -239,6 +324,9 @@ export class SettingsPanel {
       case 'state':
         if (msg.soft && dirty) break; // panel reopened: keep the user's unsaved edits
         venv.value = msg.state.venvPath; target.value = msg.state.target; extra.value = msg.state.extraArgs;
+        sfEnabled.value = ['off', 'on', 'auto'].includes(msg.state.sqlfluffEnabled) ? msg.state.sqlfluffEnabled : 'off';
+        sfFix.checked = !!msg.state.sqlfluffFixOnSave; sfDialect.value = msg.state.sqlfluffDialect; sfExtra.value = msg.state.sqlfluffExtraArgs;
+        syncSqlfluff();
         dirty = false;
         break;
       case 'venvPicked':
@@ -246,6 +334,11 @@ export class SettingsPanel {
         break;
       case 'checking':
         setVersion('', 'Checking…');
+        sfVersion.className = 'version'; sfVersion.textContent = 'Checking…';
+        break;
+      case 'sqlfluffVersion':
+        sfVersion.className = 'version ' + (msg.info.error ? 'warn' : 'ok');
+        sfVersion.textContent = msg.info.error || (msg.info.version ? 'SQLFluff ' + msg.info.version : 'SQLFluff is installed (not started while linting is off).');
         break;
       case 'version': {
         const i = msg.info;
@@ -271,6 +364,7 @@ export class SettingsPanel {
     }
   });
 
+  syncSqlfluff();
   vscode.postMessage({ type: 'ready' });
 </script>
 </body>

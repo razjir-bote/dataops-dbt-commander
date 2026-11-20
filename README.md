@@ -93,6 +93,12 @@ Supports dbt-core 1.x (tested with 1.12); not dbt 2 / Fusion.
   shows row count, nulls, distinct values, min, max and the 10 most common values, from one `dbt show` query.
 - **More tests from YAML** — *Add relationships test…* (pick the parent model / source and its column), and with
   dbt_utils installed: `not_empty_string`, `not_constant`, `at_least_one`, `accepted_range…`.
+- **SQLFluff linting (optional, off by default)** — with SQLFluff installed in the dbt venv (`pip install sqlfluff`),
+  set *Linting* to On or Auto on the settings page. SQLFluff problems then show for dbt SQL files on open and save,
+  *Format Document* uses `sqlfluff fix`, *SQLFluff: Lint file* / *Fix file* are in the editor menu, and **Fix on save**
+  (separate opt-in) fixes a file when you save it yourself. Your `.sqlfluff` / `.sqlfluffignore` are used; with no
+  dialect configured, the dbt adapter's is passed (`synapse` → `tsql`, `duckdb`, `snowflake`, …). *Off* turns every
+  SQLFluff feature off and never starts SQLFluff.
 - **Hover on macros** — signature, description and documented arguments (from `macros:` YAML) of a macro call.
 - Saved last-run results of models / tests that no longer exist are dropped when the manifest changes.
 

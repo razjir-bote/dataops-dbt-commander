@@ -23,6 +23,7 @@ import { DbtDiagnostics, killTree, lastRunOptions, runDbtTask } from './runner';
 import { listTargets, parseProjectFile, profilesDirCandidates } from './profiles';
 import { ShowResult, compiledPath } from './show';
 import { fileFor } from './manifest';
+import { SqlFluff } from './sqlfluffRunner';
 import { TestSpec } from './yamlfix';
 import { LanguageDeps, clearManifestCache, inProjectPaths, loadManifest, registerLanguageFeatures } from './language';
 import { Column, appendModel, hasModel, mergeColumns, newModelYaml, parseColumnsOutput, yamlUsable } from './yamlgen';
@@ -847,6 +848,8 @@ export interface DbtRunnerApi {
     createStaging(target: unknown, relPath: string): Promise<string | undefined>;
     newModel(folder: unknown, name: string): Promise<string | undefined>;
   };
+  /** Optional SQLFluff linting (off by default). */
+  sqlfluff: SqlFluff;
   /** v0.10: scratchpads, previews of a selection / CTE (resolve with the rows), YAML test quick fixes. */
   query: {
     newScratchpad(root: string): Promise<vscode.TextEditor | undefined>;
@@ -981,6 +984,14 @@ export function activate(ctx: vscode.ExtensionContext): DbtRunnerApi {
   void runStatus.init();
 
   registerLanguageFeatures(ctx, languageDeps, runStatus);
+
+  // Optional SQLFluff (dbtCommander.sqlfluff.enabled, off by default): registers nothing that runs while off.
+  const sqlfluff = new SqlFluff({
+    projectRootOf: languageDeps.projectRootOf,
+    isLintable: file => inProjectPaths(languageDeps, file, ['model', 'snapshot', 'analysis', 'macro', 'test']),
+    adapterType: async root => (await loadManifest(languageDeps, root))?.adapterType
+  });
+  ctx.subscriptions.push(sqlfluff);
 
   const lastRunView = new DbtLastRun(languageDeps, runStatus);
   lastRunView.view = vscode.window.createTreeView('dbtCommander.lastRun', { treeDataProvider: lastRunView });
@@ -1130,6 +1141,7 @@ export function activate(ctx: vscode.ExtensionContext): DbtRunnerApi {
       createStaging: (target, relPath) => createStagingModel(edits, target, relPath),
       newModel: (folder, name) => newModel(edits, folder, name)
     },
+    sqlfluff,
     query: {
       newScratchpad: root => newScratchpad(queryDeps, root),
       previewSelection: editor => previewSelection(queryDeps, editor),
