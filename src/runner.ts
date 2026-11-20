@@ -3,17 +3,30 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { spawn, execFile, ChildProcess } from 'child_process';
 import { executedNodeNames, parseDbtErrors } from './errors';
+import { PROCESS_LIST_PS, descendants, parseProcessList } from './proctree';
 
 /** Kill a process and its children. On Windows dbt.exe is a launcher for python.exe, so kill the tree. */
 export function killTree(child: ChildProcess): void {
   if (child.exitCode !== null || child.pid === undefined) {
     return;
   }
-  if (process.platform === 'win32') {
-    execFile('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true }, () => undefined);
-  } else {
+  if (process.platform !== 'win32') {
     child.kill();
+    return;
   }
+  // Not `taskkill /T`: it follows parent ids, and Windows reuses ids, so an unrelated older process can look
+  // like a child. List processes ourselves, keep only real descendants (created after their parent), and kill
+  // exactly those ids.
+  const root = child.pid;
+  execFile(
+    'powershell',
+    ['-NoProfile', '-NonInteractive', '-Command', PROCESS_LIST_PS],
+    { windowsHide: true, maxBuffer: 32 * 1024 * 1024 },
+    (err, stdout) => {
+      const pids = err ? [root] : [root, ...descendants(parseProcessList(stdout), root)];
+      execFile('taskkill', ['/F', ...pids.flatMap(p => ['/PID', String(p)])], { windowsHide: true }, () => undefined);
+    }
+  );
 }
 
 /**

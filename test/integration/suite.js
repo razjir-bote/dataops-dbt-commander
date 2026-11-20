@@ -114,24 +114,35 @@ exports.run = async () => {
       const running = run('run', 'models', 'slow.sql');
       await sleep(10000);
       const procs = () =>
-        execFileSync('powershell', ['-NoProfile', '-Command', 'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId)|$($_.ParentProcessId)|$($_.Name)|$($_.ExecutablePath)" }'])
+        execFileSync('powershell', [
+          '-NoProfile',
+          '-Command',
+          'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId)|$($_.ParentProcessId)|$($_.Name)|$($_.ExecutablePath)|$(if ($_.CreationDate) { $_.CreationDate.ToFileTimeUtc() } else { 0 })" }'
+        ])
           .toString().trim().split(/\r?\n/)
-          .map(l => { const [pid, ppid, name, exe] = l.trim().split('|'); return { pid: +pid, ppid: +ppid, name, exe: (exe || '').toLowerCase() }; });
+          .map(l => { const [pid, ppid, name, exe, created] = l.trim().split('|'); return { pid: +pid, ppid: +ppid, name, exe: (exe || '').toLowerCase(), created: +created }; });
       const venv = path.resolve(cfg().get('venvPath')).toLowerCase();
       const all = procs();
+      const byPid = new Map(all.map(p => [p.pid, p]));
       const ids = new Set(all.filter(p => p.name === 'dbt.exe' && p.exe.startsWith(venv)).map(p => p.pid));
+      // Real children only: Windows reuses ids, so a boot-time process (csrss, winlogon...) can name a reused
+      // id as its parent. A child must have been created after its parent.
       for (let grew = true; grew; ) {
         grew = false;
-        for (const p of all) if (ids.has(p.ppid) && !ids.has(p.pid)) { ids.add(p.pid); grew = true; }
+        for (const p of all) {
+          const parent = byPid.get(p.ppid);
+          if (ids.has(p.ppid) && !ids.has(p.pid) && parent && p.created >= parent.created) { ids.add(p.pid); grew = true; }
+        }
       }
       const tree = all.filter(p => ids.has(p.pid)).map(p => `${p.pid}:${p.name}`);
       for (const e of vscode.tasks.taskExecutions) e.terminate();
       await running;
-      await sleep(3000);
-      const alive = procs().filter(p => ids.has(p.pid)).map(p => `${p.pid}:${p.name}`);
+      await sleep(4000);
+      const alive = procs().filter(p => ids.has(p.pid) && byPid.get(p.pid).created === p.created).map(p => `${p.pid}:${p.name}`);
       fs.unlinkSync(slow);
       assert.ok(tree.some(t => t.endsWith('python.exe')), 'dbt was not running: ' + tree.join(','));
-      assert.deepEqual(alive, [], `tree=${tree.join(',')}`);
+      assert.ok(!tree.some(t => /csrss|winlogon|dwm|fontdrvhost/i.test(t)), 'system processes in the tree: ' + tree.join(','));
+      assert.deepEqual(alive, [], `still running: ${alive.join(',')} (tree=${tree.join(',')})`);
     });
   }
 
