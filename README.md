@@ -36,6 +36,13 @@ Supports dbt-core 1.x (tested with 1.12); not dbt 2 / Fusion.
 - **dbt sidebar** — the dbt icon in the Activity Bar shows Models (by folder), Sources, Seeds, Snapshots and Tests
   (by model), with run / build / test / seed / snapshot buttons, and Compile / Preview / Generate YAML on right-click.
 
+- **dbt tests in the Testing panel** — every dbt test appears in VS Code's Testing view, grouped by model / source,
+  with run buttons, Run All, Rerun Failed, pass/fail icons next to each test in your YAML, and dbt's failure
+  message ("Got 2 results, configured to fail if != 0") at the test. Output goes to Test Results; a warn result
+  shows as passed with the warning in the output.
+- **Hover on `ref()` / `source()`** — description, materialization, file path and columns (types from
+  `target/catalog.json` when you've run `dbt docs generate`).
+
 Go to definition and autocomplete read `target/manifest.json`, which dbt rewrites on every run, build, compile or
 parse — so they reflect your last dbt command. Without a manifest, `ref()` still jumps to a model file of that name.
 

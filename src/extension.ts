@@ -24,6 +24,7 @@ import { LanguageDeps, clearManifestCache, loadManifest, registerLanguageFeature
 import { Column, appendModel, hasModel, mergeColumns, newModelYaml, parseColumnsOutput, yamlUsable } from './yamlgen';
 import { cleanLine } from './errors';
 import { DbtItem, DbtSidebar } from './sidebar';
+import { DbtTests } from './testing';
 
 let statusItem: vscode.StatusBarItem;
 let targetItem: vscode.StatusBarItem;
@@ -641,7 +642,12 @@ async function runNode(item: DbtItem | undefined, action: 'test' | 'snapshot'): 
   });
 }
 
-export function activate(ctx: vscode.ExtensionContext): { sidebar: DbtSidebar } {
+async function projectRoots(): Promise<string[]> {
+  const found = await vscode.workspace.findFiles('**/dbt_project.yml', '**/{dbt_packages,target,node_modules,.venv,venv,.vscode-test}/**', 50);
+  return [...new Set(found.map(u => path.dirname(u.fsPath)))].sort();
+}
+
+export function activate(ctx: vscode.ExtensionContext): { sidebar: DbtSidebar; tests: DbtTests } {
   context = ctx;
   diagnostics = new DbtDiagnostics(vscode.languages.createDiagnosticCollection('dbt'));
 
@@ -718,7 +724,17 @@ export function activate(ctx: vscode.ExtensionContext): { sidebar: DbtSidebar } 
 
   void refreshStatus();
   void refreshTarget();
-  return { sidebar };
+  const tests = new DbtTests({
+    language: languageDeps,
+    projectRoots,
+    requireExe,
+    flags: () => flagArgs(cfg().get<string>('target', ''), cfg().get<string>('extraArgs', '')),
+    diagnostics
+  });
+  ctx.subscriptions.push(tests);
+  void tests.refresh();
+
+  return { sidebar, tests };
 }
 
 export function deactivate(): void {}

@@ -1,19 +1,47 @@
 import * as path from 'path';
 
+export interface ColumnInfo {
+  name: string;
+  dataType?: string;
+  description?: string;
+}
+
 export interface ModelEntry {
+  uniqueId: string;
   name: string;
   package: string;
   version?: number | string;
   latestVersion?: number | string;
   materialized?: string;
+  description?: string;
+  columns: ColumnInfo[];
   file: string;
 }
 
 export interface SourceEntry {
+  uniqueId: string;
   source: string;
   table: string;
   package: string;
+  description?: string;
+  sourceDescription?: string;
+  loader?: string;
+  identifier?: string;
+  columns: ColumnInfo[];
   file: string;
+}
+
+const text = (v: unknown) => (typeof v === 'string' && v.trim() ? v : undefined);
+
+/** Documented columns of a manifest node / source, in YAML order. */
+function columnsOf(cols: unknown): ColumnInfo[] {
+  return Object.values<any>(cols && typeof cols === 'object' ? cols : {})
+    .filter(c => c?.name)
+    .map(c => ({
+      name: String(c.name),
+      ...(text(c.data_type) ? { dataType: c.data_type } : {}),
+      ...(text(c.description) ? { description: c.description } : {})
+    }));
 }
 
 export interface MacroEntry {
@@ -27,11 +55,16 @@ export interface MacroEntry {
 
 /** A seed, snapshot or test in the root project. */
 export interface NodeEntry {
+  uniqueId: string;
   name: string;
   package: string;
   file: string;
-  /** For tests: the model the test is attached to. */
+  /** For tests: the model (or `source.table`) the test is attached to. */
   attachedTo?: string;
+  /** For generic tests: the column the test is on. */
+  columnName?: string;
+  /** For tests: a singular test (its own .sql file) rather than a generic test declared in YAML. */
+  singular?: boolean;
 }
 
 export interface ManifestIndex {
@@ -114,23 +147,37 @@ export function parseManifest(
     return undefined;
   }
   const models: ModelEntry[] = [];
-  for (const n of Object.values<any>(m.nodes ?? {})) {
+  for (const [id, n] of Object.entries<any>(m.nodes ?? {})) {
     if (n?.resource_type !== 'model' || !n.name || !n.original_file_path) {
       continue;
     }
     models.push({
+      uniqueId: n.unique_id ?? id,
       name: n.name,
       package: n.package_name,
       ...(n.version !== null && n.version !== undefined ? { version: n.version } : {}),
       ...(n.latest_version !== null && n.latest_version !== undefined ? { latestVersion: n.latest_version } : {}),
       ...(typeof n.config?.materialized === 'string' ? { materialized: n.config.materialized } : {}),
+      ...(text(n.description) ? { description: n.description } : {}),
+      columns: columnsOf(n.columns),
       file: fileFor(root, rootPackage, n.package_name, n.original_file_path)
     });
   }
   const sources: SourceEntry[] = [];
-  for (const s of Object.values<any>(m.sources ?? {})) {
+  for (const [id, s] of Object.entries<any>(m.sources ?? {})) {
     if (s?.source_name && s.name && s.original_file_path) {
-      sources.push({ source: s.source_name, table: s.name, package: s.package_name, file: fileFor(root, rootPackage, s.package_name, s.original_file_path) });
+      sources.push({
+        uniqueId: s.unique_id ?? id,
+        source: s.source_name,
+        table: s.name,
+        package: s.package_name,
+        ...(text(s.description) ? { description: s.description } : {}),
+        ...(text(s.source_description) ? { sourceDescription: s.source_description } : {}),
+        ...(text(s.loader) ? { loader: s.loader } : {}),
+        ...(text(s.identifier) && s.identifier !== s.name ? { identifier: s.identifier } : {}),
+        columns: columnsOf(s.columns),
+        file: fileFor(root, rootPackage, s.package_name, s.original_file_path)
+      });
     }
   }
 
@@ -150,11 +197,16 @@ export function parseManifest(
   const snapshots: NodeEntry[] = [];
   const tests: NodeEntry[] = [];
   const patches = new Map<string, string>();
-  for (const n of Object.values<any>(m.nodes ?? {})) {
+  for (const [id, n] of Object.entries<any>(m.nodes ?? {})) {
     if (!n?.name || !n.original_file_path || n.package_name !== rootPackage) {
       continue;
     }
-    const entry: NodeEntry = { name: n.name, package: n.package_name, file: fileFor(root, rootPackage, n.package_name, n.original_file_path) };
+    const entry: NodeEntry = {
+      uniqueId: n.unique_id ?? id,
+      name: n.name,
+      package: n.package_name,
+      file: fileFor(root, rootPackage, n.package_name, n.original_file_path)
+    };
     if (n.resource_type === 'seed') {
       seeds.push(entry);
     } else if (n.resource_type === 'snapshot') {
@@ -164,7 +216,12 @@ export function parseManifest(
       const src = (n.depends_on?.nodes ?? []).find((d: unknown) => typeof d === 'string' && d.startsWith('source.'));
       const attached =
         typeof n.attached_node === 'string' ? n.attached_node.split('.')[2] : src ? src.split('.').slice(2).join('.') : undefined;
-      tests.push({ ...entry, ...(attached ? { attachedTo: attached } : {}) });
+      tests.push({
+        ...entry,
+        ...(attached ? { attachedTo: attached } : {}),
+        ...(text(n.column_name) ? { columnName: n.column_name } : {}),
+        singular: /\.sql$/i.test(n.original_file_path)
+      });
     } else if (n.resource_type === 'model' && typeof n.patch_path === 'string') {
       // e.g. "demo://models\\schema.yml"
       const rel = n.patch_path.replace(/^[^:]+:\/\//, '');

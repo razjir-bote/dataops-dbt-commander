@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { callAt, completionContext, macroCallAt } from './jinja';
+import { DbtHoverProvider } from './hover';
 import { ManifestIndex, macroDefinitionLine, parseManifest, resolveMacro, resolveRef, sourceTableLine } from './manifest';
 
 export interface LanguageDeps {
@@ -39,7 +40,14 @@ export async function loadManifest(deps: LanguageDeps, root: string): Promise<Ma
   const index = fs.promises
     .readFile(file, 'utf8')
     .then(text => parseManifest(text, root, deps.projectNameOf(root) ?? path.basename(root), deps.dbtIncludeDir()))
-    .catch(() => undefined);
+    .catch(() => undefined)
+    .then(result => {
+      // A half-written manifest (dbt still writing) must not stay cached as "no manifest": retry next time.
+      if (!result && cache.get(file)?.index === index) {
+        cache.delete(file);
+      }
+      return result;
+    });
   cache.set(file, { mtime, index });
   return index;
 }
@@ -181,6 +189,7 @@ export function registerLanguageFeatures(ctx: vscode.ExtensionContext, deps: Lan
     }),
     vscode.languages.registerCompletionItemProvider(selector, new DbtCompletionProvider(deps), "'", '"'),
     vscode.languages.registerCodeLensProvider(selector, lenses),
+    vscode.languages.registerHoverProvider(selector, new DbtHoverProvider(deps)),
     vscode.workspace.onDidChangeConfiguration(e => e.affectsConfiguration('dbtRunner.codeLens') && lenses.refresh())
   );
 }

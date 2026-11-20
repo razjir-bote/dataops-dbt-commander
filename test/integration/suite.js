@@ -306,6 +306,94 @@ exports.run = async () => {
     assert.match(results()[0], /^test\.demo\.not_null_b_id/);
   });
 
+  // ----- v0.5: Testing panel, hovers -----
+
+  const testItems = async () => {
+    await api.tests.refresh();
+    const projects = [];
+    api.tests.controller.items.forEach(p => projects.push(p));
+    assert.equal(projects.length, 1, 'expected one project in the Testing panel');
+    const groups = new Map();
+    projects[0].children.forEach(g => {
+      const tests = [];
+      g.children.forEach(t => tests.push(t));
+      groups.set(g.label, tests);
+    });
+    return { project: projects[0], groups };
+  };
+  const runTests = items => api.tests.run(new vscode.TestRunRequest(items), new vscode.CancellationTokenSource().token);
+
+  await step('Testing panel: tests grouped by model, located in the YAML', async () => {
+    const { groups } = await testItems();
+    const b = groups.get('b');
+    assert.ok(b, 'no "b" group: ' + [...groups.keys()].join(','));
+    assert.deepEqual(b.map(t => t.label), ['not_null_b_id']);
+    const lines = fs.readFileSync(file('models', 'schema.yml'), 'utf8').split(/\r?\n/);
+    assert.match(lines[b[0].range.start.line], /- name: id/);
+  });
+
+  await step('Testing panel: run one test → passed', async () => {
+    const { groups } = await testItems();
+    const t = groups.get('b')[0];
+    // A refresh while the run is in progress (dbt rewrites the manifest) must not break the run.
+    const [out] = await Promise.all([runTests([t]), (async () => { await sleep(200); await api.tests.refresh(); })()]);
+    assert.deepEqual(out.get(t.id), { state: 'passed' });
+    assert.equal(results().length, 1);
+  });
+
+  await step('Testing panel: failing test → failed with dbt message; group and project runs', async () => {
+    fs.writeFileSync(file('models', 'dup.sql'), 'select 1 as id union all select 1\n');
+    fs.writeFileSync(file('models', 'dup.yml'), 'version: 2\nmodels:\n  - name: dup\n    columns:\n      - name: id\n        data_tests: [unique, not_null]\n');
+    try {
+      await run('run', 'models', 'dup.sql'); // builds dup and refreshes the manifest
+      const { project, groups } = await testItems();
+      const dup = groups.get('dup');
+      assert.deepEqual(dup.map(t => t.label).sort(), ['not_null_dup_id', 'unique_dup_id']);
+      const groupItem = [];
+      project.children.forEach(g => g.label === 'dup' && groupItem.push(g));
+      const out = await runTests(groupItem);
+      const unique = dup.find(t => t.label === 'unique_dup_id');
+      const notNull = dup.find(t => t.label === 'not_null_dup_id');
+      assert.equal(out.get(unique.id).state, 'failed');
+      assert.match(out.get(unique.id).message, /Got 1 result, configured to fail if != 0/);
+      assert.equal(out.get(notNull.id).state, 'passed');
+      const all = await runTests([project]);
+      assert.equal(all.size, 3, [...all.values()].map(o => o.state).join(','));
+      assert.equal([...all.values()].filter(o => o.state === 'failed').length, 1);
+      // Whole project minus the failing test: runs `dbt test --exclude unique_dup_id`.
+      const fresh = await testItems();
+      const failing = fresh.groups.get('dup').find(t => t.label === 'unique_dup_id');
+      const rest = await api.tests.run(new vscode.TestRunRequest([fresh.project], [failing]), new vscode.CancellationTokenSource().token);
+      assert.equal(rest.size, 2);
+      assert.ok([...rest.values()].every(o => o.state === 'passed'), [...rest.values()].map(o => o.state).join(','));
+      assert.ok(!results().some(r => r.startsWith('test.demo.unique_dup_id')), 'excluded test ran');
+    } finally {
+      fs.unlinkSync(file('models', 'dup.sql'));
+      fs.unlinkSync(file('models', 'dup.yml'));
+      await vscode.commands.executeCommand('dbtRunner.parse');
+    }
+  });
+
+  const hoverText = async (rel, needle) => {
+    const doc = await vscode.workspace.openTextDocument(uri(...rel));
+    const off = doc.getText().indexOf(needle);
+    const hovers = await vscode.commands.executeCommand('vscode.executeHoverProvider', doc.uri, doc.positionAt(off + 1));
+    return hovers.flatMap(h => h.contents.map(c => (typeof c === 'string' ? c : c.value))).join('\n');
+  };
+
+  await step('hover on ref() shows the model', async () => {
+    const text = await hoverText(['models', 'c.sql'], "'b'");
+    assert.match(text, /\*\*b\*\* · model · `view`/);
+    assert.match(text, /`models\/b\.sql`/);
+    assert.match(text, /\| `id` \|/);
+  });
+
+  await step('hover on source() shows the source table', async () => {
+    const text = await hoverText(['analyses', 'from_source.sql'], "'customers'");
+    assert.match(text, /\*\*raw\.customers\*\* · source/);
+    assert.match(text, /`models\/sources\.yml`/);
+  });
+
   await step('go to definition without a manifest falls back to the file name', async () => {
     fs.rmSync(file('target', 'manifest.json'), { force: true });
     const d = await definition(['models', 'c.sql'], "'b'");
