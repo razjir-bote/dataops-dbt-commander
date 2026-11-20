@@ -1,7 +1,7 @@
 # DataOps dbt Commander — developer handover
 
 Keep this file current: update it in the same commit as any change to features, architecture, build/release
-process, or known issues. Last updated: 2026-11-21 (v0.11.1 released; Show lineage on any node and optional SQLFluff after it).
+process, or known issues. Last updated: 2026-11-21 (v0.12.0 released: optional SQLFluff, Show lineage on any node).
 
 ## What this is
 A VS Code extension (TypeScript) for working with **dbt-core 1.x** (tested with 1.12.7) on **Windows**, running
@@ -14,7 +14,7 @@ Since v0.9.0 the extension ID is `local.dataops-dbt-commander` and every command
 is `dbtCommander.*`; `migrate.ts` copies old `dbtRunner.*` user and workspace settings once on activation.
 
 ## Status
-- **v0.12 (unreleased, version still 0.11.1): optional SQLFluff**, off by default (`dbtCommander.sqlfluff.enabled`
+- **v0.12.0 — released** (https://github.com/razjir-bote/dataops-dbt-commander/releases/tag/v0.12.0): **optional SQLFluff**, off by default (`dbtCommander.sqlfluff.enabled`
   off / on / auto). `sqlfluff.ts` (pure: JSON parsing, dialect from adapter, config detection, args, CRLF→file EOL)
   and `sqlfluffRunner.ts` (stdin runs with `--stdin-filename`, so `.sqlfluff` / `.sqlfluffignore` apply; problems on
   open / save; fix on manual save via `onWillSaveTextDocument` + `waitUntil`; a formatter registered only while active;
@@ -31,7 +31,7 @@ is `dbtCommander.*`; `migrate.ts` copies old `dbtRunner.*` user and workspace se
   counts columns in code points, VS Code in UTF-16 units (an emoji shifts ranges on its line); with fix on save and
   `editor.formatOnSave` both on, SQLFluff runs twice per save; the formatter is registered for every `.sql` file
   (returns nothing outside dbt folders).
-- **After v0.11.1 (unreleased):** *Show lineage* centres the Lineage panel on any manifest node —
+- **Also in v0.12.0:** *Show lineage* centres the Lineage panel on any manifest node —
   `DbtLineage.pinNode(root, id)`, used for sidebar source tables / exposures / semantic models (their `DbtItem.data.uniqueId`)
   and for Lineage panel items (re-centre). Files still follow the editor only for models / seeds / snapshots.
 - **v0.11.0 — released** (https://github.com/razjir-bote/dataops-dbt-commander/releases/tag/v0.11.0): preview table sort / filter / Copy (TSV) /
