@@ -7,14 +7,42 @@ function insideDbtPackages(dir: string): boolean {
 }
 
 /**
+ * Whether `dir` lies inside an ancestor project's packages-install-path (an installed package, not a project).
+ * `hasProject(d)`: d contains a dbt_project.yml; `installPathOf(d)`: that project's packages-install-path.
+ */
+export function isUnderPackages(dir: string, hasProject: (d: string) => boolean, installPathOf: (root: string) => string): boolean {
+  const target = path.resolve(dir).toLowerCase();
+  let anc = path.dirname(path.resolve(dir));
+  while (true) {
+    if (hasProject(anc)) {
+      const install = path.resolve(anc, ...installPathOf(anc).split('/')).toLowerCase();
+      if (target === install || target.startsWith(install + path.sep)) {
+        return true;
+      }
+    }
+    const up = path.dirname(anc);
+    if (up === anc) {
+      return false;
+    }
+    anc = up;
+  }
+}
+
+/**
  * Walk up from a model file to the nearest folder containing dbt_project.yml.
  * Projects inside dbt_packages are skipped, and the walk never goes above `stopAt`.
  */
-export function findProjectRoot(filePath: string, exists: (p: string) => boolean, stopAt?: string): string | undefined {
+export function findProjectRoot(
+  filePath: string,
+  exists: (p: string) => boolean,
+  stopAt?: string,
+  /** True for an installed package's folder (under a project's packages-install-path): not a project of its own. */
+  isPackageRoot: (dir: string) => boolean = () => false
+): string | undefined {
   let dir = path.dirname(path.resolve(filePath));
   const stop = stopAt ? path.resolve(stopAt).toLowerCase() : undefined;
   while (true) {
-    if (!insideDbtPackages(dir) && exists(path.join(dir, 'dbt_project.yml'))) {
+    if (!insideDbtPackages(dir) && exists(path.join(dir, 'dbt_project.yml')) && !isPackageRoot(dir)) {
       return dir;
     }
     const parent = path.dirname(dir);
@@ -125,12 +153,13 @@ export function parseDbtVersion(output: string): { version: string; major: numbe
 export function groupByProject(
   files: string[],
   exists: (p: string) => boolean,
-  stopAtFor: (file: string) => string | undefined = () => undefined
+  stopAtFor: (file: string) => string | undefined = () => undefined,
+  isPackageRoot: (dir: string) => boolean = () => false
 ): { projects: Map<string, string[]>; orphans: string[] } {
   const projects = new Map<string, string[]>();
   const orphans: string[] = [];
   for (const f of files) {
-    const root = findProjectRoot(f, exists, stopAtFor(f));
+    const root = findProjectRoot(f, exists, stopAtFor(f), isPackageRoot);
     if (!root) {
       orphans.push(f);
     } else {

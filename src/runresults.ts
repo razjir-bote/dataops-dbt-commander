@@ -149,7 +149,7 @@ const cell = (s: string | undefined) => safe((s ?? '').replace(/\s*\r?\n\s*/g, '
 const code = (s: string) => '`' + s.replace(/`/g, "'") + '`';
 
 /** Documented columns merged with the warehouse's (catalog order and types first, then documented-only columns). */
-function mergeColumns(documented: ColumnInfo[], catalog: ColumnInfo[] | undefined): ColumnInfo[] {
+export function columnsFor(documented: ColumnInfo[], catalog: ColumnInfo[] | undefined): ColumnInfo[] {
   if (!catalog?.length) {
     return documented;
   }
@@ -176,7 +176,7 @@ export function modelHover(model: ModelEntry, catalog: ColumnInfo[] | undefined,
     ...(model.description ? ['', safe(model.description)] : []),
     '',
     `\`${relPath(root, model.file)}\``,
-    ...columnTable(mergeColumns(model.columns, catalog))
+    ...columnTable(columnsFor(model.columns, catalog))
   ].join('\n');
 }
 
@@ -190,6 +190,6 @@ export function sourceHover(src: SourceEntry, catalog: ColumnInfo[] | undefined,
     ...(facts.length ? ['', facts.join(' · ')] : []),
     '',
     `\`${relPath(root, src.file)}\``,
-    ...columnTable(mergeColumns(src.columns, catalog))
+    ...columnTable(columnsFor(src.columns, catalog))
   ].join('\n');
 }

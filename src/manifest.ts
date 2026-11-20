@@ -104,9 +104,9 @@ export interface ManifestIndex {
   patches: Map<string, string>;
 }
 
-function fileFor(root: string, rootPackage: string, pkg: string, original: string): string {
+function fileFor(root: string, rootPackage: string, pkg: string, original: string, packagesDir = 'dbt_packages'): string {
   const rel = original.split(/[\\/]/);
-  return pkg === rootPackage ? path.join(root, ...rel) : path.join(root, 'dbt_packages', pkg, ...rel);
+  return pkg === rootPackage ? path.join(root, ...rel) : path.join(root, ...packagesDir.split('/'), pkg, ...rel);
 }
 
 /**
@@ -119,17 +119,20 @@ export function macroFile(
   pkg: string,
   original: string,
   dbtIncludeDir: string | undefined,
-  exists: (p: string) => boolean
+  exists: (p: string) => boolean,
+  /** `packages-install-path` (relative to the project, '/'-separated). */
+  packagesDir = 'dbt_packages'
 ): string | undefined {
+  const pkgDir = (...more: string[]) => path.join(root, ...packagesDir.split('/'), pkg, ...more);
   const rel = original.split(/[\\/]/);
   if (pkg === rootPackage) {
     return path.join(root, ...rel);
   }
-  if (pkg !== 'dbt' && exists(path.join(root, 'dbt_packages', pkg))) {
-    return path.join(root, 'dbt_packages', pkg, ...rel);
+  if (pkg !== 'dbt' && exists(pkgDir())) {
+    return pkgDir(...rel);
   }
   if (!dbtIncludeDir) {
-    return pkg === 'dbt' ? undefined : path.join(root, 'dbt_packages', pkg, ...rel);
+    return pkg === 'dbt' ? undefined : pkgDir(...rel);
   }
   if (pkg === 'dbt') {
     return path.join(dbtIncludeDir, 'global_project', ...rel);
@@ -137,7 +140,7 @@ export function macroFile(
   if (pkg.startsWith('dbt_')) {
     return path.join(dbtIncludeDir, pkg.slice('dbt_'.length), ...rel);
   }
-  return path.join(root, 'dbt_packages', pkg, ...rel);
+  return pkgDir(...rel);
 }
 
 /** The macro a call refers to: the named package if given, else the project, then packages/adapters, then dbt. */
@@ -161,7 +164,8 @@ export function parseManifest(
   root: string,
   rootPackage: string,
   dbtIncludeDir?: string,
-  exists: (p: string) => boolean = p => require('fs').existsSync(p)
+  exists: (p: string) => boolean = p => require('fs').existsSync(p),
+  packagesDir = 'dbt_packages'
 ): ManifestIndex | undefined {
   let m: any;
   try {
@@ -186,7 +190,7 @@ export function parseManifest(
       ...(typeof n.config?.materialized === 'string' ? { materialized: n.config.materialized } : {}),
       ...(text(n.description) ? { description: n.description } : {}),
       columns: columnsOf(n.columns),
-      file: fileFor(root, rootPackage, n.package_name, n.original_file_path)
+      file: fileFor(root, rootPackage, n.package_name, n.original_file_path, packagesDir)
     });
   }
   const sources: SourceEntry[] = [];
@@ -202,7 +206,7 @@ export function parseManifest(
         ...(text(s.loader) ? { loader: s.loader } : {}),
         ...(text(s.identifier) && s.identifier !== s.name ? { identifier: s.identifier } : {}),
         columns: columnsOf(s.columns),
-        file: fileFor(root, rootPackage, s.package_name, s.original_file_path)
+        file: fileFor(root, rootPackage, s.package_name, s.original_file_path, packagesDir)
       });
     }
   }
@@ -210,7 +214,7 @@ export function parseManifest(
   const macros: MacroEntry[] = [];
   for (const mc of Object.values<any>(m.macros ?? {})) {
     if (mc?.name && mc.package_name && mc.original_file_path) {
-      const file = macroFile(root, rootPackage, mc.package_name, mc.original_file_path, dbtIncludeDir, exists);
+      const file = macroFile(root, rootPackage, mc.package_name, mc.original_file_path, dbtIncludeDir, exists, packagesDir);
       const internal =
         mc.package_name === 'dbt' ||
         mc.package_name === `dbt_${m.metadata?.adapter_type}` ||
@@ -231,7 +235,7 @@ export function parseManifest(
       uniqueId: n.unique_id ?? id,
       name: n.name,
       package: n.package_name,
-      file: fileFor(root, rootPackage, n.package_name, n.original_file_path)
+      file: fileFor(root, rootPackage, n.package_name, n.original_file_path, packagesDir)
     };
     if (n.resource_type === 'seed') {
       seeds.push(entry);
@@ -265,7 +269,7 @@ export function parseManifest(
         name: n.name,
         type: typeOf(n.resource_type),
         package: n.package_name,
-        ...(n.original_file_path ? { file: fileFor(root, rootPackage, n.package_name, n.original_file_path) } : {})
+        ...(n.original_file_path ? { file: fileFor(root, rootPackage, n.package_name, n.original_file_path, packagesDir) } : {})
       });
     }
   }
@@ -279,7 +283,7 @@ export function parseManifest(
         name: e.name,
         type: 'exposure',
         package: e.package_name,
-        ...(e.original_file_path ? { file: fileFor(root, rootPackage, e.package_name, e.original_file_path) } : {})
+        ...(e.original_file_path ? { file: fileFor(root, rootPackage, e.package_name, e.original_file_path, packagesDir) } : {})
       });
     }
   }

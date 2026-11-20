@@ -36,7 +36,7 @@ function splitCallArgs(args: string): string[] {
   return out;
 }
 
-function parseCall(fn: string, rawArgs: string): JinjaCall | undefined {
+export function parseCall(fn: string, rawArgs: string): JinjaCall | undefined {
   const positional: string[] = [];
   let version: string | undefined;
   for (const arg of splitCallArgs(rawArgs)) {

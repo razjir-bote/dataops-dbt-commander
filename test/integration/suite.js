@@ -224,7 +224,8 @@ exports.run = async () => {
     // "Illegal argument" while the document was being disposed.
     await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri('models', 'b.sql')));
     const lenses = await vscode.commands.executeCommand('vscode.executeCodeLensProvider', uri('models', 'b.sql'));
-    const cmds = lenses.map(l => l.command && l.command.command);
+    // A model that has run also gets a status badge lens first (no command); the actions follow.
+    const cmds = lenses.map(l => l.command && l.command.command).filter(Boolean);
     assert.deepEqual(cmds, ['dbtRunner.run', 'dbtRunner.build', 'dbtRunner.test', 'dbtRunner.compile', 'dbtRunner.preview']);
     const none = await vscode.commands.executeCommand('vscode.executeCodeLensProvider', uri('analyses', 'from_source.sql'));
     assert.equal(none.length, 0, 'lenses shown outside models/');
@@ -521,6 +522,113 @@ exports.run = async () => {
     assert.match(text, /`models\/sources\.yml`/);
   });
 
+  // ----- v0.7: retry, rerun, run status, last run, columns, references, custom folders -----
+
+  const waitFor = async (what, check, ms = 8000) => {
+    const end = Date.now() + ms;
+    for (;;) {
+      const v = await check();
+      if (v) return v;
+      if (Date.now() > end) throw new Error('timed out waiting for ' + what);
+      await sleep(200);
+    }
+  };
+
+  await step('dbt retry reruns only what failed; rerun last repeats the last command', async () => {
+    const bad = file('models', 'zz_bad.sql');
+    fs.writeFileSync(bad, 'select * from does_not_exist\n');
+    try {
+      await vscode.commands.executeCommand('dbtRunner.build', vscode.Uri.file(file('models')), [vscode.Uri.file(file('models'))]);
+      assert.ok(results().includes('model.demo.zz_bad'));
+      await waitFor('error badge', () => (api.runStatus.badge(root, 'model.demo.zz_bad') || '').startsWith('✗ error'));
+      fs.writeFileSync(bad, 'select 1 as id\n');
+      await vscode.commands.executeCommand('dbtRunner.retry');
+      assert.deepEqual(results(), ['model.demo.zz_bad']);
+      await waitFor('fixed badge', () => (api.runStatus.badge(root, 'model.demo.zz_bad') || '').startsWith('✓'));
+    } finally {
+      fs.unlinkSync(bad);
+    }
+    await run('run', 'models', 'b.sql');
+    const rr = file('target', 'run_results.json');
+    const firstInvocation = JSON.parse(fs.readFileSync(rr, 'utf8')).metadata.invocation_id;
+    await vscode.commands.executeCommand('dbtRunner.rerunLast');
+    const again = JSON.parse(fs.readFileSync(rr, 'utf8'));
+    assert.notEqual(again.metadata.invocation_id, firstInvocation, 'rerun did not run dbt');
+    assert.deepEqual(results(), ['model.demo.b']);
+  });
+
+  await step('last run status: store, CodeLens badge, sidebar badge, Last run view', async () => {
+    await waitFor('b badge', () => (api.runStatus.badge(root, 'model.demo.b') || '').startsWith('✓'));
+    assert.match(api.runStatus.badge(root, 'model.demo.b'), /^✓ (just now|\dm ago) · \d+\.\ds$/);
+    await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri('models', 'b.sql')));
+    const lenses = await vscode.commands.executeCommand('vscode.executeCodeLensProvider', uri('models', 'b.sql'));
+    assert.match(lenses[0].command.title, /^✓ /);
+    assert.equal(lenses.length, 6);
+    const top = await api.sidebar.getChildren();
+    const models = await api.sidebar.getChildren(await child(top, 'Models'));
+    assert.match((await child(models, 'b')).description, /^✓ /);
+    await waitFor('last run view', async () => (await api.lastRun.getChildren()).length > 0);
+    const items = await api.lastRun.getChildren();
+    assert.deepEqual(labels(items), ['b']);
+    assert.match(items[0].description, /^success · \d+\.\ds$/);
+    assert.ok(same(items[0].command.arguments[0].fsPath, file('models', 'b.sql')));
+  });
+
+  await step('column autocomplete after a ref() alias', async () => {
+    const tmp = file('models', 'zz_cols.sql');
+    const text = "select o. from {{ ref('b') }} o";
+    fs.writeFileSync(tmp, text);
+    try {
+      const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(tmp));
+      const list = await vscode.commands.executeCommand('vscode.executeCompletionItemProvider', doc.uri, doc.positionAt(text.indexOf('o.') + 2), '.');
+      const names = list.items.map(i => (typeof i.label === 'string' ? i.label : i.label.label));
+      assert.ok(names.includes('id'), names.slice(0, 20).join(','));
+    } finally {
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+      fs.rmSync(tmp, { force: true });
+    }
+  });
+
+  await step('find references: who ref()s a model', async () => {
+    const refsAt = async (rel, needle) => {
+      const doc = await vscode.workspace.openTextDocument(uri(...rel));
+      const off = needle ? doc.getText().indexOf(needle) + 1 : 0;
+      const locs = await vscode.commands.executeCommand('vscode.executeReferenceProvider', doc.uri, doc.positionAt(off));
+      return locs.map(l => `${path.relative(root, l.uri.fsPath).split(path.sep).join('/')}:${l.range.start.line}`).sort();
+    };
+    const fromCall = await refsAt(['models', 'c.sql'], "'b'");
+    assert.ok(fromCall.includes('models/c.sql:0') && fromCall.includes('snapshots/snap.sql:2'), fromCall.join(','));
+    const fromFile = await refsAt(['models', 'b.sql']);
+    assert.ok(fromFile.includes('models/c.sql:0') && fromFile.includes('snapshots/snap.sql:2'), fromFile.join(','));
+  });
+
+  await step('custom model-paths: menus, CodeLens and builds work in a non-default folder', async () => {
+    const projectFile = file('dbt_project.yml');
+    const original = fs.readFileSync(projectFile, 'utf8');
+    fs.mkdirSync(file('transform', 'sub'), { recursive: true });
+    fs.writeFileSync(file('transform', 'sub', 't.sql'), 'select 1 as id\n');
+    fs.writeFileSync(projectFile, original + 'model-paths: ["models", "transform"]\n');
+    try {
+      await api.publishPathKeys();
+      const keys = api.pathKeys().model;
+      for (const p of [file('transform'), file('transform', 'sub'), file('transform', 'sub', 't.sql'), file('models', 'b.sql')]) {
+        assert.ok(keys[vscode.Uri.file(p).fsPath], `${p} missing from dbtRunner.modelPaths`);
+      }
+      // Open it first: VS Code's codelens command can throw "Illegal argument" for unopened documents.
+      await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.file(file('transform', 'sub', 't.sql'))));
+      const lenses = await vscode.commands.executeCommand('vscode.executeCodeLensProvider', vscode.Uri.file(file('transform', 'sub', 't.sql')));
+      assert.ok(lenses.length >= 5, 'no CodeLens in the custom model folder');
+      await vscode.commands.executeCommand('dbtRunner.build', vscode.Uri.file(file('transform')), [vscode.Uri.file(file('transform'))]);
+      assert.deepEqual(results(), ['model.demo.t']);
+    } finally {
+      fs.writeFileSync(projectFile, original);
+      fs.rmSync(file('transform'), { recursive: true, force: true });
+      await vscode.commands.executeCommand('dbtRunner.parse');
+      await api.publishPathKeys();
+    }
+    assert.ok(!api.pathKeys().model[vscode.Uri.file(file('transform')).fsPath], 'transform still published after removal');
+  });
+
   await step('go to definition without a manifest falls back to the file name', async () => {
     fs.rmSync(file('target', 'manifest.json'), { force: true });
     const d = await definition(['models', 'c.sql'], "'b'");
@@ -577,7 +685,7 @@ exports.run = async () => {
   await step('folder menu shows for project folders, not for target / dbt_packages / .git', async () => {
     const pkg = require(path.resolve(__dirname, '..', '..', 'package.json'));
     const when = pkg.contributes.menus['explorer/context'].find(m => m.submenu === 'dbtRunner.submenu').when;
-    const folderPart = when.split('||')[1];
+    const folderPart = when.slice(when.indexOf('explorerResourceIsFolder'));
     const [excluded] = [...folderPart.matchAll(/=~ \/(.+?)\/i/g)].map(m => new RegExp(m[1], 'i'));
     const shows = p => !excluded.test(p);
     for (const ok of [root, file('seeds'), file('seeds', 'ref'), file('models', 'staging'), file('snapshots')]) {

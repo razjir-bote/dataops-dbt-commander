@@ -2,8 +2,11 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { callAt, completionContext, macroCallAt } from './jinja';
-import { DbtHoverProvider } from './hover';
+import { DbtHoverProvider, loadCatalog } from './hover';
+import { aliasBefore, aliasesIn, refLines } from './columns';
+import { columnsFor } from './runresults';
 import { ManifestIndex, macroDefinitionLine, parseManifest, resolveMacro, resolveRef, sourceTableLine } from './manifest';
+import { ProjectPaths } from './projectconfig';
 
 export interface LanguageDeps {
   projectRootOf(file: string): string | undefined;
@@ -11,11 +14,32 @@ export interface LanguageDeps {
   projectNameOf(root: string): string | undefined;
   /** `<venv>/.../site-packages/dbt/include`, where dbt's own and adapter macros live. */
   dbtIncludeDir(): string | undefined;
+  /** Configured resource folders, packages and target path (dbt_project.yml, with dbt defaults). */
+  pathsOf(root: string): ProjectPaths;
+  /** dbt projects in the workspace (installed packages excluded). */
+  projectRoots?(): Promise<string[]>;
 }
 
-const DBT_SQL_DIRS = /[\\/](models|macros|tests|snapshots|analyses)[\\/]/i;
-const MODEL_FILE = /[\\/]models[\\/]/i;
-const EXCLUDED = /[\\/](dbt_packages|target)[\\/]/i;
+type PathKind = 'model' | 'seed' | 'snapshot' | 'analysis' | 'macro' | 'test';
+
+/** Whether `file` lies in one of the project's configured folders of these kinds (e.g. model-paths). */
+export function inProjectPaths(deps: LanguageDeps, file: string, kinds: PathKind[]): boolean {
+  const root = deps.projectRootOf(file);
+  if (!root) {
+    return false;
+  }
+  // Windows paths are case-insensitive: `Transform` in dbt_project.yml matches a `transform` folder.
+  const fold = (s: string) => (process.platform === 'win32' ? s.toLowerCase() : s);
+  const rel = fold(path.relative(root, file).split(path.sep).join('/'));
+  if (rel.startsWith('..')) {
+    return false;
+  }
+  const paths = deps.pathsOf(root);
+  if ([paths.packagesInstall, paths.target].map(fold).some(d => rel === d || rel.startsWith(d + '/'))) {
+    return false;
+  }
+  return kinds.some(k => paths[k].map(fold).some(d => rel.startsWith(d + '/')));
+}
 
 // Parsed manifests by file, re-read only when the file's mtime changes. Reads are async so a large
 // manifest doesn't block typing; concurrent requests share one in-flight read.
@@ -39,7 +63,9 @@ export async function loadManifest(deps: LanguageDeps, root: string): Promise<Ma
   }
   const index = fs.promises
     .readFile(file, 'utf8')
-    .then(text => parseManifest(text, root, deps.projectNameOf(root) ?? path.basename(root), deps.dbtIncludeDir()))
+    .then(text =>
+      parseManifest(text, root, deps.projectNameOf(root) ?? path.basename(root), deps.dbtIncludeDir(), p => fs.existsSync(p), deps.pathsOf(root).packagesInstall)
+    )
     .catch(() => undefined)
     .then(result => {
       // A half-written manifest (dbt still writing) must not stay cached as "no manifest": retry next time.
@@ -81,7 +107,7 @@ class DbtDefinitionProvider implements vscode.DefinitionProvider {
         '**/{dbt_packages,target,node_modules}/**',
         20
       );
-      const hit = found.find(u => MODEL_FILE.test(u.fsPath));
+      const hit = found.find(u => inProjectPaths(this.deps, u.fsPath, ['model']));
       return hit ? new vscode.Location(hit, new vscode.Position(0, 0)) : undefined;
     }
     const src = index?.sources.find(s => s.source === call.source && s.table === call.table);
@@ -114,9 +140,12 @@ class DbtCompletionProvider implements vscode.CompletionItemProvider {
   async provideCompletionItems(doc: vscode.TextDocument, pos: vscode.Position): Promise<vscode.CompletionItem[] | undefined> {
     const before = doc.lineAt(pos.line).text.slice(0, pos.character);
     const ctx = completionContext(before);
-    const root = ctx && this.deps.projectRootOf(doc.uri.fsPath);
+    if (!ctx) {
+      return this.columnCompletions(doc, pos, before);
+    }
+    const root = this.deps.projectRootOf(doc.uri.fsPath);
     const index = root ? await loadManifest(this.deps, root) : undefined;
-    if (!ctx || !root || !index) {
+    if (!root || !index) {
       return undefined;
     }
     const word = /[\w.-]*$/.exec(before)?.[0] ?? '';
@@ -144,52 +173,152 @@ class DbtCompletionProvider implements vscode.CompletionItemProvider {
       .filter(s => s.source === ctx.source)
       .map(s => item(s.table, vscode.CompletionItemKind.Field, `source table · ${s.source}`, s.file));
   }
+
+  /** `o.` after `from {{ ref('orders') }} o`: the model's (or source's) columns. */
+  private async columnCompletions(doc: vscode.TextDocument, pos: vscode.Position, before: string): Promise<vscode.CompletionItem[] | undefined> {
+    const alias = aliasBefore(before);
+    // Not inside a string literal ('a.b'): an odd number of quotes before the cursor on this line.
+    const inString = ((before.match(/'/g) ?? []).length % 2) === 1;
+    const call = alias && !inString ? aliasesIn(doc.getText()).get(alias.toLowerCase()) : undefined;
+    const root = call && this.deps.projectRootOf(doc.uri.fsPath);
+    const index = root ? await loadManifest(this.deps, root) : undefined;
+    if (!call || !root || !index) {
+      return undefined;
+    }
+    const entity =
+      call.kind === 'ref'
+        ? resolveRef(index.models, call.name, call.package, call.version)
+        : index.sources.find(s => s.source === call.source && s.table === call.table);
+    if (!entity) {
+      return undefined;
+    }
+    const catalog = await loadCatalog(this.deps, root);
+    const typed = /\w*$/.exec(before)?.[0] ?? '';
+    const range = new vscode.Range(pos.line, pos.character - typed.length, pos.line, pos.character);
+    const owner = 'name' in entity ? entity.name : `${entity.source}.${entity.table}`;
+    return columnsFor(entity.columns, catalog?.get(entity.uniqueId)).map((c, i) => {
+      const ci = new vscode.CompletionItem(c.name, vscode.CompletionItemKind.Field);
+      ci.detail = [c.dataType, owner].filter(Boolean).join(' · ');
+      if (c.description) {
+        ci.documentation = c.description;
+      }
+      ci.sortText = String(i).padStart(5, '0'); // table order
+      ci.range = range;
+      return ci;
+    });
+  }
+}
+
+/** Where the CodeLens gets a model's last run result from (the run-state store). */
+export interface RunStatusSource {
+  badge(root: string, uniqueId: string): string | undefined;
+  readonly onDidChange: vscode.Event<void>;
 }
 
 class DbtCodeLensProvider implements vscode.CodeLensProvider {
   private readonly changed = new vscode.EventEmitter<void>();
   readonly onDidChangeCodeLenses = this.changed.event;
 
+  constructor(private readonly deps: LanguageDeps, private readonly status?: RunStatusSource) {
+    status?.onDidChange(() => this.refresh());
+  }
+
   refresh(): void {
     this.changed.fire();
   }
 
-  provideCodeLenses(doc: vscode.TextDocument): vscode.CodeLens[] {
+  async provideCodeLenses(doc: vscode.TextDocument): Promise<vscode.CodeLens[]> {
     const p = doc.uri.fsPath;
     if (
       !vscode.workspace.getConfiguration('dbtRunner').get<boolean>('codeLens', true) ||
       doc.uri.scheme !== 'file' ||
       !/\.sql$/i.test(p) ||
-      !MODEL_FILE.test(p) ||
-      EXCLUDED.test(p)
+      !inProjectPaths(this.deps, p, ['model'])
     ) {
       return [];
     }
     const range = new vscode.Range(0, 0, 0, 0);
-    return [
+    const lenses = [
       ['$(play) Run', 'dbtRunner.run'],
       ['Build', 'dbtRunner.build'],
       ['Test', 'dbtRunner.test'],
       ['Compile', 'dbtRunner.compile'],
       ['Preview', 'dbtRunner.preview']
     ].map(([title, command]) => new vscode.CodeLens(range, { title, command, arguments: [doc.uri], tooltip: `dbt ${title.replace('$(play) ', '').toLowerCase()} this model` }));
+    // The model's last result, e.g. "✓ 3m ago · 1.2s", as the first (non-clickable) lens.
+    const root = this.deps.projectRootOf(p);
+    const model = root ? (await loadManifest(this.deps, root))?.models.find(m => m.file.toLowerCase() === p.toLowerCase()) : undefined;
+    const badge = root && model ? this.status?.badge(root, model.uniqueId) : undefined;
+    if (badge) {
+      lenses.unshift(new vscode.CodeLens(range, { title: badge, command: '', tooltip: 'Last dbt result for this model' }));
+    }
+    return lenses;
   }
 }
 
-export function registerLanguageFeatures(ctx: vscode.ExtensionContext, deps: LanguageDeps): void {
+/** Shift+F12: the models / snapshots / analyses that ref() a model, at the ref() line. */
+class DbtReferenceProvider implements vscode.ReferenceProvider {
+  constructor(private readonly deps: LanguageDeps) {}
+
+  async provideReferences(doc: vscode.TextDocument, pos: vscode.Position, context: vscode.ReferenceContext): Promise<vscode.Location[] | undefined> {
+    const root = this.deps.projectRootOf(doc.uri.fsPath);
+    const index = root ? await loadManifest(this.deps, root) : undefined;
+    if (!root || !index) {
+      return undefined;
+    }
+    // On a ref('x') call: references to x. Elsewhere in a model file: references to that model.
+    const call = callAt(doc.lineAt(pos.line).text, pos.character);
+    const model =
+      call?.kind === 'ref'
+        ? resolveRef(index.models, call.name, call.package, call.version)
+        : index.models.find(m => m.file.toLowerCase() === doc.uri.fsPath.toLowerCase());
+    if (!model) {
+      return undefined;
+    }
+    const out: vscode.Location[] = [];
+    if (context.includeDeclaration) {
+      out.push(new vscode.Location(vscode.Uri.file(model.file), new vscode.Position(0, 0)));
+    }
+    for (const id of index.children.get(model.uniqueId) ?? []) {
+      const child = index.nodes.get(id);
+      // Models (.sql and Python `dbt.ref()`), snapshots, analyses and singular tests; generic tests live in
+      // YAML and are reported by the YAML file's own `ref()` lines (e.g. relationships `to: ref('x')`).
+      if (!child?.file || !/\.(sql|py)$/i.test(child.file)) {
+        continue;
+      }
+      let text: string;
+      try {
+        text = await fs.promises.readFile(child.file, 'utf8');
+      } catch {
+        continue;
+      }
+      const lines = text.split(/\r?\n/);
+      for (const line of refLines(text, model.name)) {
+        out.push(new vscode.Location(vscode.Uri.file(child.file), new vscode.Range(line, 0, line, lines[line].length)));
+      }
+    }
+    return out;
+  }
+}
+
+export function registerLanguageFeatures(ctx: vscode.ExtensionContext, deps: LanguageDeps, status?: RunStatusSource): void {
   const selector: vscode.DocumentSelector = [
     { scheme: 'file', language: 'sql' },
     { scheme: 'file', language: 'jinja-sql' },
     { scheme: 'file', pattern: '**/*.sql' }
   ];
-  const lenses = new DbtCodeLensProvider();
+  const lenses = new DbtCodeLensProvider(deps, status);
   ctx.subscriptions.push(
     vscode.languages.registerDefinitionProvider(selector, {
-      provideDefinition: (doc, pos) => (DBT_SQL_DIRS.test(doc.uri.fsPath) ? new DbtDefinitionProvider(deps).provideDefinition(doc, pos) : undefined)
+      provideDefinition: (doc, pos) =>
+        inProjectPaths(deps, doc.uri.fsPath, ['model', 'macro', 'test', 'snapshot', 'analysis'])
+          ? new DbtDefinitionProvider(deps).provideDefinition(doc, pos)
+          : undefined
     }),
-    vscode.languages.registerCompletionItemProvider(selector, new DbtCompletionProvider(deps), "'", '"'),
+    vscode.languages.registerCompletionItemProvider(selector, new DbtCompletionProvider(deps), "'", '"', '.'),
     vscode.languages.registerCodeLensProvider(selector, lenses),
     vscode.languages.registerHoverProvider(selector, new DbtHoverProvider(deps)),
+    vscode.languages.registerReferenceProvider(selector, new DbtReferenceProvider(deps)),
     vscode.workspace.onDidChangeConfiguration(e => e.affectsConfiguration('dbtRunner.codeLens') && lenses.refresh())
   );
 }

@@ -9,7 +9,7 @@ import { modelHover, parseCatalog, sourceHover } from './runresults';
 const catalogs = new Map<string, { mtime: number; cols: Map<string, ColumnInfo[]> }>();
 
 /** `target/catalog.json` (written by `dbt docs generate`), if present; cached by mtime. */
-async function loadCatalog(deps: LanguageDeps, root: string): Promise<Map<string, ColumnInfo[]> | undefined> {
+export async function loadCatalog(deps: LanguageDeps, root: string): Promise<Map<string, ColumnInfo[]> | undefined> {
   const file = path.join(deps.targetDirOf(root), 'catalog.json');
   try {
     const mtime = (await fs.promises.stat(file)).mtimeMs;

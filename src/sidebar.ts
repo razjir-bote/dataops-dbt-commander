@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { LanguageDeps, loadManifest } from './language';
+import { LanguageDeps, RunStatusSource, loadManifest } from './language';
 import { ManifestIndex, sourceTableLine } from './manifest';
 import { levelOf, sectionTargets } from './tree';
 
@@ -53,10 +53,18 @@ export class DbtSidebar implements vscode.TreeDataProvider<DbtItem>, vscode.Disp
   private readonly disposables: vscode.Disposable[] = [];
   private timer: NodeJS.Timeout | undefined;
 
-  constructor(private readonly deps: LanguageDeps) {
+  constructor(private readonly deps: LanguageDeps, private readonly status?: RunStatusSource) {
     const watcher = vscode.workspace.createFileSystemWatcher('**/manifest.json');
     const later = () => this.refreshSoon();
     this.disposables.push(watcher, watcher.onDidChange(later), watcher.onDidCreate(later), watcher.onDidDelete(later), this.changed);
+    if (status) {
+      this.disposables.push(status.onDidChange(later)); // last-run badges
+    }
+  }
+
+  /** "✓ 3m ago · 1.2s" etc. for a node, if it has run. */
+  private badge(root: string, uniqueId: string): string | undefined {
+    return this.status?.badge(root, uniqueId);
   }
 
   refresh(): void {
@@ -106,6 +114,9 @@ export class DbtSidebar implements vscode.TreeDataProvider<DbtItem>, vscode.Disp
   }
 
   private async projectRoots(): Promise<string[]> {
+    if (this.deps.projectRoots) {
+      return this.deps.projectRoots();
+    }
     const found = await vscode.workspace.findFiles('**/dbt_project.yml', '**/{dbt_packages,target,node_modules,.venv,venv,.vscode-test}/**', 50);
     return [...new Set(found.map(u => path.dirname(u.fsPath)))].sort();
   }
@@ -182,7 +193,7 @@ export class DbtSidebar implements vscode.TreeDataProvider<DbtItem>, vscode.Disp
   }
 
   /** The project's own models or seeds, as {name, file}. */
-  private entries(root: string, index: ManifestIndex, kind: 'model' | 'seed'): { name: string; file: string }[] {
+  private entries(root: string, index: ManifestIndex, kind: 'model' | 'seed'): { name: string; file: string; uniqueId: string }[] {
     const pkg = this.rootPackage(root);
     return kind === 'model' ? index.models.filter(m => m.package === pkg) : index.seeds;
   }
@@ -220,6 +231,7 @@ export class DbtSidebar implements vscode.TreeDataProvider<DbtItem>, vscode.Disp
       .sort((a, b) => a.name.localeCompare(b.name))
       .map(e => {
         const it = new DbtItem(e.name, kind, root, None, { name: e.name });
+        it.description = this.badge(root, e.uniqueId);
         it.resourceUri = vscode.Uri.file(e.file);
         it.iconPath = new vscode.ThemeIcon(kind === 'model' ? 'symbol-class' : 'table');
         it.command = openCommand(e.file);
@@ -248,11 +260,12 @@ export class DbtSidebar implements vscode.TreeDataProvider<DbtItem>, vscode.Disp
       });
   }
 
-  private leaves(root: string, nodes: { name: string; file: string }[], kind: ItemKind, icon: string): DbtItem[] {
+  private leaves(root: string, nodes: { name: string; file: string; uniqueId: string }[], kind: ItemKind, icon: string): DbtItem[] {
     return [...nodes]
       .sort((a, b) => a.name.localeCompare(b.name))
       .map(n => {
         const it = new DbtItem(n.name, kind, root, None, { name: n.name });
+        it.description = this.badge(root, n.uniqueId);
         it.resourceUri = vscode.Uri.file(n.file);
         it.iconPath = new vscode.ThemeIcon(icon);
         it.command = openCommand(n.file);

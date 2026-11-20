@@ -14,11 +14,12 @@ import {
   modelName,
   folderSelectors,
   graphSelectors,
+  isUnderPackages,
   modelSelector,
   withGraph
 } from './dbt';
 import { SettingsPanel, detectDbtVersion } from './settingsPanel';
-import { DbtDiagnostics, killTree, runDbtTask } from './runner';
+import { DbtDiagnostics, killTree, lastRunOptions, runDbtTask } from './runner';
 import { listTargets, parseProjectFile, profilesDirCandidates } from './profiles';
 import { compiledPath, parseShowOutput } from './show';
 import { PreviewPanel } from './previewPanel';
@@ -27,8 +28,11 @@ import { Column, appendModel, hasModel, mergeColumns, newModelYaml, parseColumns
 import { cleanLine } from './errors';
 import { DbtItem, DbtSidebar } from './sidebar';
 import { pickSelection } from './tree';
+import { ProjectPaths, projectPaths, resourcePaths } from './projectconfig';
 import { DbtTests } from './testing';
 import { DbtLineage } from './lineage';
+import { RunStatusStore } from './runstatus';
+import { DbtLastRun } from './lastrun';
 
 let statusItem: vscode.StatusBarItem;
 let targetItem: vscode.StatusBarItem;
@@ -79,13 +83,12 @@ function targetsFor(root: string): { targets: string[]; defaultTarget?: string }
 async function pickProjectRoot(ask: boolean): Promise<string | undefined> {
   const doc = vscode.window.activeTextEditor?.document;
   if (doc?.uri.scheme === 'file') {
-    const root = findProjectRoot(doc.uri.fsPath, exists, stopAt(doc.uri.fsPath));
+    const root = findProjectRoot(doc.uri.fsPath, exists, stopAt(doc.uri.fsPath), isPackageRoot);
     if (root) {
       return root;
     }
   }
-  const found = await vscode.workspace.findFiles('**/dbt_project.yml', '**/{dbt_packages,target,node_modules,.venv,venv}/**', 50);
-  const roots = found.map(u => path.dirname(u.fsPath)).sort();
+  const roots = await projectRoots();
   if (roots.length <= 1 || !ask) {
     return roots[0];
   }
@@ -121,11 +124,84 @@ function dbtIncludeDir(): string | undefined {
   return undefined;
 }
 
+/** Configured folders from dbt_project.yml (defaults when absent), cached by file mtime. */
+const pathsCache = new Map<string, { mtime: number; paths: ProjectPaths }>();
+function pathsOf(root: string): ProjectPaths {
+  const file = path.join(root, 'dbt_project.yml');
+  let mtime = 0;
+  try {
+    mtime = fs.statSync(file).mtimeMs;
+  } catch {
+    // no dbt_project.yml: defaults
+  }
+  const hit = pathsCache.get(root);
+  if (hit && hit.mtime === mtime) {
+    return hit.paths;
+  }
+  let text = '';
+  try {
+    text = fs.readFileSync(file, 'utf8');
+  } catch {
+    // defaults
+  }
+  const paths = projectPaths(text);
+  pathsCache.set(root, { mtime, paths });
+  return paths;
+}
+
+// ---------- configured folders → menu context keys ----------
+
+/** Last published sets (fsPath → true), also returned to the integration suite. */
+let pathKeys: { model: Record<string, true>; seed: Record<string, true>; snapshot: Record<string, true> } = { model: {}, seed: {}, snapshot: {} };
+
+/**
+ * Publish each project's model / seed / snapshot folders and files (from dbt_project.yml, so custom names like
+ * `model-paths: [transform]` work) for menu conditions: `resourcePath in dbtRunner.modelPaths`.
+ */
+async function publishPathKeys(): Promise<void> {
+  const keys: typeof pathKeys = { model: {}, seed: {}, snapshot: {} };
+  const list = (dir: string) => {
+    try {
+      return fs.readdirSync(dir, { withFileTypes: true }).map(e => ({ name: e.name, dir: e.isDirectory() }));
+    } catch {
+      return undefined;
+    }
+  };
+  for (const root of await projectRoots()) {
+    const paths = pathsOf(root);
+    // Use each folder's real on-disk spelling (dbt_project.yml may say `Transform` for `transform`): the
+    // context keys must match VS Code's `resourcePath` exactly.
+    const onDisk = (d: string) => {
+      try {
+        return path.relative(root, fs.realpathSync.native(path.join(root, ...d.split('/')))).split(path.sep).join('/');
+      } catch {
+        return d;
+      }
+    };
+    const add = (set: Record<string, true>, dirs: string[], ext: RegExp) => {
+      for (const p of resourcePaths(root, dirs.map(onDisk), ext, list)) {
+        set[vscode.Uri.file(p).fsPath] = true; // same form as the `resourcePath` context key
+      }
+    };
+    add(keys.model, paths.model, /\.sql$/i);
+    add(keys.seed, paths.seed, /\.csv$/i);
+    add(keys.snapshot, paths.snapshot, /\.sql$/i);
+  }
+  pathKeys = keys;
+  await Promise.all([
+    vscode.commands.executeCommand('setContext', 'dbtRunner.modelPaths', keys.model),
+    vscode.commands.executeCommand('setContext', 'dbtRunner.seedPaths', keys.seed),
+    vscode.commands.executeCommand('setContext', 'dbtRunner.snapshotPaths', keys.snapshot)
+  ]);
+}
+
 const languageDeps: LanguageDeps = {
-  projectRootOf: file => findProjectRoot(file, exists, stopAt(file)),
+  projectRootOf: file => findProjectRoot(file, exists, stopAt(file), isPackageRoot),
+  projectRoots,
   targetDirOf,
   projectNameOf: root => readProject(root).name,
-  dbtIncludeDir
+  dbtIncludeDir,
+  pathsOf
 };
 
 async function requireExe(): Promise<string | undefined> {
@@ -205,7 +281,7 @@ async function resolveSelection(
   }
   // A folder's project is found by walking up from inside it.
   const probe = (p: string) => (isDir(p) ? path.join(p, '_') : p);
-  const { projects, orphans } = groupByProject(paths.map(probe), exists, stopAt);
+  const { projects, orphans } = groupByProject(paths.map(probe), exists, stopAt, isPackageRoot);
   if (orphans.length) {
     const shown = orphans.map(o => (path.basename(o) === '_' && isDir(path.dirname(o)) ? path.basename(path.dirname(o)) + '/' : path.basename(o)));
     void vscode.window.showErrorMessage(
@@ -517,6 +593,8 @@ async function projectCommand(
   if (!exe) {
     return undefined;
   }
+  // deps takes no target. retry still needs the flags dbt reads before the previous run's arguments
+  // (e.g. --profiles-dir); --target is accepted and harmless.
   const flags = args[0] === 'deps' ? [] : flagArgs(cfg().get<string>('target', ''), cfg().get<string>('extraArgs', ''));
   const code = await runDbtTask({ exe, args: [...args, ...flags], cwd: root, title: label, diagnostics, targetDir: targetDirOf(root), folder: workspaceFolderOf(root) });
   return { root, code };
@@ -566,6 +644,8 @@ async function selectTarget(): Promise<void> {
 async function showMenu(): Promise<void> {
   void refreshStatus(); // dbt may have been installed into the venv since the last check
   const items: (vscode.QuickPickItem & { command: string })[] = [
+    { label: '$(debug-restart) Rerun last command', command: 'dbtRunner.rerunLast' },
+    { label: '$(refresh) dbt retry', description: 'rerun only what failed last time', command: 'dbtRunner.retry' },
     { label: '$(package) dbt deps', command: 'dbtRunner.deps' },
     { label: '$(table) dbt seed', command: 'dbtRunner.seed' },
     { label: '$(history) dbt snapshot', command: 'dbtRunner.snapshot' },
@@ -681,12 +761,44 @@ const treeUris = (items: DbtItem[]): vscode.Uri[] =>
   items.flatMap(i => (i.data?.targets?.length ? i.data.targets.map(t => vscode.Uri.file(t)) : i.resourceUri ? [i.resourceUri] : []));
 const treeSel = (item: DbtItem | undefined, selected: DbtItem[] | undefined) => pickSelection(item, selected);
 
+/** dbt projects in the workspace — not installed packages, wherever packages-install-path puts them. */
 async function projectRoots(): Promise<string[]> {
   const found = await vscode.workspace.findFiles('**/dbt_project.yml', '**/{dbt_packages,target,node_modules,.venv,venv,.vscode-test}/**', 50);
-  return [...new Set(found.map(u => path.dirname(u.fsPath)))].sort();
+  return [...new Set(found.map(u => path.dirname(u.fsPath)))].filter(r => !isPackageRoot(r)).sort();
 }
 
-export function activate(ctx: vscode.ExtensionContext): { sidebar: DbtSidebar; tests: DbtTests; lineage: DbtLineage } {
+/** A configured model / seed / snapshot folder, or anything inside one (for the menu context keys). */
+function inResourceFolder(file: string): boolean {
+  if (/[\\/](\.git|node_modules|\.venv|venv|__pycache__)([\\/]|$)/i.test(file)) {
+    return false;
+  }
+  const root = languageDeps.projectRootOf(file);
+  if (!root) {
+    return false;
+  }
+  const rel = path.relative(root, file).split(path.sep).join('/');
+  const p = pathsOf(root);
+  const same = (a: string, b: string) => (process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b);
+  const under = (a: string, d: string) => same(a, d) || (process.platform === 'win32' ? a.toLowerCase() : a).startsWith((process.platform === 'win32' ? d.toLowerCase() : d) + '/');
+  return [...p.model, ...p.seed, ...p.snapshot].some(d => under(rel, d)) && ![p.target, p.packagesInstall].some(d => under(rel, d));
+}
+
+/** An installed package's folder (inside an ancestor project's packages-install-path), not a project. */
+function isPackageRoot(dir: string): boolean {
+  return isUnderPackages(dir, d => exists(path.join(d, 'dbt_project.yml')), r => pathsOf(r).packagesInstall);
+}
+
+export interface DbtRunnerApi {
+  sidebar: DbtSidebar;
+  tests: DbtTests;
+  lineage: DbtLineage;
+  runStatus: RunStatusStore;
+  lastRun: DbtLastRun;
+  pathKeys: () => typeof pathKeys;
+  publishPathKeys: () => Promise<void>;
+}
+
+export function activate(ctx: vscode.ExtensionContext): DbtRunnerApi {
   context = ctx;
   diagnostics = new DbtDiagnostics(vscode.languages.createDiagnosticCollection('dbt'));
 
@@ -742,9 +854,61 @@ export function activate(ctx: vscode.ExtensionContext): { sidebar: DbtSidebar; t
     })
   );
 
-  registerLanguageFeatures(ctx, languageDeps);
+  // Last result per node, from every run_results.json (extension and terminal runs).
+  const runStatus = new RunStatusStore(ctx.workspaceState, { projectRootOf: languageDeps.projectRootOf, targetDirOf, projectRoots });
+  ctx.subscriptions.push(runStatus);
+  void runStatus.init();
 
-  const sidebar = new DbtSidebar(languageDeps);
+  registerLanguageFeatures(ctx, languageDeps, runStatus);
+
+  const lastRunView = new DbtLastRun(languageDeps, runStatus);
+  lastRunView.view = vscode.window.createTreeView('dbtRunner.lastRun', { treeDataProvider: lastRunView });
+  ctx.subscriptions.push(
+    lastRunView,
+    lastRunView.view,
+    // dbt retry: rerun only what failed / was skipped in the last run, in that run's project.
+    vscode.commands.registerCommand('dbtRunner.retry', async (forRoot?: unknown) => {
+      // From a notification: the project that run was in. Otherwise the latest run's project.
+      const root = (typeof forRoot === 'string' && forRoot) || runStatus.lastRun?.root || (await pickProjectRoot(true));
+      if (!root || !exists(path.join(targetDirOf(root), 'run_results.json'))) {
+        void vscode.window.showInformationMessage('dbt Runner: there is no previous dbt run to retry.');
+        return;
+      }
+      await projectCommand(['retry'], 'retry', root);
+    }),
+    vscode.commands.registerCommand('dbtRunner.rerunLast', async () => {
+      const last = lastRunOptions();
+      if (!last) {
+        void vscode.window.showInformationMessage('dbt Runner: no dbt command has been run yet in this window.');
+        return;
+      }
+      await runDbtTask(last);
+    })
+  );
+
+  // Menus for custom folder names (model-paths etc.): publish now, and when projects or files change.
+  void publishPathKeys();
+  let pathTimer: NodeJS.Timeout | undefined;
+  const republish = () => {
+    clearTimeout(pathTimer);
+    pathTimer = setTimeout(() => void publishPathKeys(), 1000);
+  };
+  const projectWatcher = vscode.workspace.createFileSystemWatcher('**/dbt_project.yml');
+  const fileWatcher = vscode.workspace.createFileSystemWatcher('**/*', false, true, false); // create / delete only
+  ctx.subscriptions.push(
+    projectWatcher,
+    fileWatcher,
+    projectWatcher.onDidChange(republish),
+    projectWatcher.onDidCreate(republish),
+    projectWatcher.onDidDelete(republish),
+    // Only changes inside configured model / seed / snapshot folders (or those folders themselves) matter —
+    // not target/ writes during runs, .git, venvs or packages.
+    fileWatcher.onDidCreate(uri => inResourceFolder(uri.fsPath) && republish()),
+    fileWatcher.onDidDelete(uri => inResourceFolder(uri.fsPath) && republish()),
+    { dispose: () => clearTimeout(pathTimer) }
+  );
+
+  const sidebar = new DbtSidebar(languageDeps, runStatus);
   ctx.subscriptions.push(
     sidebar,
     vscode.window.createTreeView('dbtRunner.project', { treeDataProvider: sidebar, showCollapseAll: true, canSelectMany: true }),
@@ -804,7 +968,7 @@ export function activate(ctx: vscode.ExtensionContext): { sidebar: DbtSidebar; t
   );
   void lineage.follow(vscode.window.activeTextEditor?.document.uri);
 
-  return { sidebar, tests, lineage };
+  return { sidebar, tests, lineage, runStatus, lastRun: lastRunView, pathKeys: () => pathKeys, publishPathKeys };
 }
 
 export function deactivate(): void {}

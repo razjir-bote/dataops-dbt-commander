@@ -52,6 +52,16 @@ Supports dbt-core 1.x (tested with 1.12); not dbt 2 / Fusion.
 - **Hover on `ref()` / `source()`** — description, materialization, file path and columns (types from
   `target/catalog.json` when you've run `dbt docs generate`).
 
+- **After a run** — the last result of every model, seed, snapshot and test (`✓ 3m ago · 1.2s`, `✗ error 5m ago`)
+  shows in the sidebar and above each model, from every dbt run including ones in your terminal. The **Last run**
+  view lists the latest run's nodes, slowest first. **dbt retry** reruns only what failed (status bar menu, Last
+  run view, or the notification). **Rerun last command**: `Ctrl+'` then `L` (not while the terminal has focus).
+  Runs longer than `dbtRunner.notifyAfterSeconds` (default 30) end with a notification.
+- **Column autocomplete** — after `from {{ ref('orders') }} o`, typing `o.` lists the model's columns.
+- **Find references** — Shift+F12 on `ref('orders')` or in `orders.sql` lists everything that refs it.
+- **Custom folders** — `model-paths`, `seed-paths`, `snapshot-paths` and `packages-install-path` from
+  `dbt_project.yml` are respected by menus, links and navigation.
+
 Go to definition and autocomplete read `target/manifest.json`, which dbt rewrites on every run, build, compile or
 parse — so they reflect your last dbt command. Without a manifest, `ref()` still jumps to a model file of that name.
 

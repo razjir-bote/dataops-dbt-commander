@@ -3,6 +3,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { spawn, execFile, ChildProcess } from 'child_process';
 import { executedNodeNames, parseDbtErrors } from './errors';
+import { invocationOf } from './runresults';
+import { runSummary } from './runstate';
 import { PROCESS_LIST_PS, descendants, parseProcessList } from './proctree';
 
 /** Kill a process and its children. On Windows dbt.exe is a launcher for python.exe, so kill the tree. */
@@ -129,6 +131,8 @@ export async function runDbtTask(opts: RunOptions): Promise<number | undefined> 
       onDidClose: close.event,
       open: () => {
         const started = Date.now();
+        const rrFile = path.join(opts.targetDir, 'run_results.json');
+        const previousInvocation = invocationIn(rrFile);
         write.fire(`\x1b[2m> dbt ${opts.args.join(' ')}\x1b[0m\r\n\r\n`);
         child = spawn(opts.exe, opts.args, {
           cwd: opts.cwd,
@@ -146,17 +150,18 @@ export async function runDbtTask(opts: RunOptions): Promise<number | undefined> 
           if (settled) {
             return;
           }
-          let executed: string[] = [];
+          // run_results.json from this invocation only (not one left by an earlier or concurrent dbt command);
+          // none means dbt failed early (e.g. parse error): only replace problems for nodes reported now.
+          let json: string | undefined;
           try {
-            const rr = path.join(opts.targetDir, 'run_results.json');
-            if (fs.statSync(rr).mtimeMs >= started - 1000) {
-              executed = executedNodeNames(fs.readFileSync(rr, 'utf8'));
-            }
+            const text = fs.readFileSync(rrFile, 'utf8');
+            json = invocationOf(text) !== previousInvocation ? text : undefined;
           } catch {
-            // no run_results.json (e.g. parse failure): only replace problems for nodes reported now
+            json = undefined;
           }
-          opts.diagnostics.update(output, opts.cwd, executed);
+          opts.diagnostics.update(output, opts.cwd, json ? executedNodeNames(json) : []);
           settle(code ?? undefined, `\r\n\x1b[${code === 0 ? 32 : 31}m● dbt exited with code ${code}\x1b[0m\r\n`);
+          void notifyIfLong(opts, Date.now() - started, code ?? undefined, json);
         });
       },
       close: () => {
@@ -177,6 +182,40 @@ export async function runDbtTask(opts: RunOptions): Promise<number | undefined> 
     execution
   );
   task.presentationOptions = { reveal: vscode.TaskRevealKind.Always, clear: true, panel: vscode.TaskPanelKind.Shared };
+  lastRun = opts;
   await vscode.tasks.executeTask(task);
   return finished;
+}
+
+let lastRun: RunOptions | undefined;
+
+/** The last dbt command started through the terminal runner (for "Rerun last command"). */
+export function lastRunOptions(): RunOptions | undefined {
+  return lastRun;
+}
+
+function invocationIn(file: string): string | undefined {
+  try {
+    return invocationOf(fs.readFileSync(file, 'utf8'));
+  } catch {
+    return undefined;
+  }
+}
+
+/** A notification for runs longer than `dbtRunner.notifyAfterSeconds`, with Retry when something failed. */
+async function notifyIfLong(opts: RunOptions, ms: number, code: number | undefined, json: string | undefined): Promise<void> {
+  const threshold = vscode.workspace.getConfiguration('dbtRunner').get<number>('notifyAfterSeconds', 30);
+  if (!threshold || ms < threshold * 1000 || code === undefined) {
+    return;
+  }
+  const summary = json ? runSummary(json) : undefined;
+  const failed = code !== 0 || (summary?.errors ?? 0) > 0;
+  const text = summary?.text ?? `dbt ${opts.args[0]} finished with exit code ${code} (${Math.round(ms / 1000)}s)`;
+  const buttons = [...(failed && summary ? ['Retry'] : []), 'Show results'];
+  const pick = await (failed ? vscode.window.showWarningMessage(text, ...buttons) : vscode.window.showInformationMessage(text, ...buttons));
+  if (pick === 'Retry') {
+    await vscode.commands.executeCommand('dbtRunner.retry', opts.cwd); // retry *this* run's project
+  } else if (pick === 'Show results') {
+    await vscode.commands.executeCommand('dbtRunner.lastRun.focus');
+  }
 }

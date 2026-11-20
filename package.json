@@ -2,7 +2,7 @@
   "name": "dbt-runner",
   "displayName": "dbt Runner",
   "description": "Run, build, test, compile and preview dbt models from the VS Code Explorer and editor with dbt-core 1.x from a configured venv.",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "publisher": "local",
   "license": "MIT",
   "engines": {
@@ -184,6 +184,18 @@
         "command": "dbtRunner.tree.buildUpDownstream",
         "title": "Build + Upstream & Downstream",
         "category": "dbt Runner"
+      },
+      {
+        "command": "dbtRunner.retry",
+        "title": "dbt retry (rerun what failed)",
+        "category": "dbt Runner",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "dbtRunner.rerunLast",
+        "title": "Rerun last dbt command",
+        "category": "dbt Runner",
+        "icon": "$(debug-restart)"
       }
     ],
     "submenus": [
@@ -196,30 +208,30 @@
       "explorer/context": [
         {
           "submenu": "dbtRunner.submenu",
-          "when": "(resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models([\\\\/]|$)/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i) || (explorerResourceIsFolder && resourcePath not =~ /[\\\\/](dbt_packages|target|node_modules|logs|\\.git|\\.venv|venv|\\.vscode|__pycache__)([\\\\/]|$)/i)",
+          "when": "(resourceExtname =~ /^\\.sql$/i && (resourcePath =~ /[\\\\/]models([\\\\/]|$)/i || resourcePath in dbtRunner.modelPaths) && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i) || (explorerResourceIsFolder && resourcePath not =~ /[\\\\/](dbt_packages|target|node_modules|logs|\\.git|\\.venv|venv|\\.vscode|__pycache__)([\\\\/]|$)/i)",
           "group": "navigation@90"
         },
         {
           "command": "dbtRunner.seedFiles",
-          "when": "resourceExtname =~ /^\\.csv$/i && resourcePath =~ /[\\\\/]seeds[\\\\/]/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i",
+          "when": "resourceExtname =~ /^\\.csv$/i && (resourcePath =~ /[\\\\/]seeds[\\\\/]/i || resourcePath in dbtRunner.seedPaths) && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i",
           "group": "navigation@91"
         }
       ],
       "editor/title/context": [
         {
           "submenu": "dbtRunner.submenu",
-          "when": "resourceScheme == file && resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models([\\\\/]|$)/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
+          "when": "resourceScheme == file && resourceExtname =~ /^\\.sql$/i && (resourcePath =~ /[\\\\/]models([\\\\/]|$)/i || resourcePath in dbtRunner.modelPaths) && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
         }
       ],
       "editor/title": [
         {
           "command": "dbtRunner.build",
-          "when": "resourceScheme == file && resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models([\\\\/]|$)/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i",
+          "when": "resourceScheme == file && resourceExtname =~ /^\\.sql$/i && (resourcePath =~ /[\\\\/]models([\\\\/]|$)/i || resourcePath in dbtRunner.modelPaths) && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i",
           "group": "navigation@-10"
         },
         {
           "command": "dbtRunner.seedFiles",
-          "when": "resourceScheme == file && resourceExtname =~ /^\\.csv$/i && resourcePath =~ /[\\\\/]seeds[\\\\/]/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i",
+          "when": "resourceScheme == file && resourceExtname =~ /^\\.csv$/i && (resourcePath =~ /[\\\\/]seeds[\\\\/]/i || resourcePath in dbtRunner.seedPaths) && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i",
           "group": "navigation@-10"
         }
       ],
@@ -227,7 +239,7 @@
         {
           "command": "dbtRunner.run",
           "group": "dbt@1",
-          "when": "!explorerResourceIsFolder || resourcePath =~ /[\\\\/]models([\\\\/]|$)/i"
+          "when": "!explorerResourceIsFolder || (resourcePath =~ /[\\\\/]models([\\\\/]|$)/i || resourcePath in dbtRunner.modelPaths)"
         },
         {
           "command": "dbtRunner.build",
@@ -236,7 +248,7 @@
         {
           "command": "dbtRunner.test",
           "group": "dbt@3",
-          "when": "!explorerResourceIsFolder || resourcePath =~ /[\\\\/]models([\\\\/]|$)/i"
+          "when": "!explorerResourceIsFolder || (resourcePath =~ /[\\\\/]models([\\\\/]|$)/i || resourcePath in dbtRunner.modelPaths)"
         },
         {
           "command": "dbtRunner.seedFiles",
@@ -286,35 +298,35 @@
       "commandPalette": [
         {
           "command": "dbtRunner.run",
-          "when": "editorIsOpen && resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models([\\\\/]|$)/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
+          "when": "editorIsOpen && resourceExtname =~ /^\\.sql$/i && (resourcePath =~ /[\\\\/]models([\\\\/]|$)/i || resourcePath in dbtRunner.modelPaths) && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
         },
         {
           "command": "dbtRunner.build",
-          "when": "editorIsOpen && resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models([\\\\/]|$)/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
+          "when": "editorIsOpen && resourceExtname =~ /^\\.sql$/i && (resourcePath =~ /[\\\\/]models([\\\\/]|$)/i || resourcePath in dbtRunner.modelPaths) && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
         },
         {
           "command": "dbtRunner.test",
-          "when": "editorIsOpen && resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models([\\\\/]|$)/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
+          "when": "editorIsOpen && resourceExtname =~ /^\\.sql$/i && (resourcePath =~ /[\\\\/]models([\\\\/]|$)/i || resourcePath in dbtRunner.modelPaths) && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
         },
         {
           "command": "dbtRunner.buildUpstream",
-          "when": "editorIsOpen && resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models([\\\\/]|$)/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
+          "when": "editorIsOpen && resourceExtname =~ /^\\.sql$/i && (resourcePath =~ /[\\\\/]models([\\\\/]|$)/i || resourcePath in dbtRunner.modelPaths) && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
         },
         {
           "command": "dbtRunner.buildDownstream",
-          "when": "editorIsOpen && resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models([\\\\/]|$)/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
+          "when": "editorIsOpen && resourceExtname =~ /^\\.sql$/i && (resourcePath =~ /[\\\\/]models([\\\\/]|$)/i || resourcePath in dbtRunner.modelPaths) && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
         },
         {
           "command": "dbtRunner.buildUpDownstream",
-          "when": "editorIsOpen && resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models([\\\\/]|$)/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
+          "when": "editorIsOpen && resourceExtname =~ /^\\.sql$/i && (resourcePath =~ /[\\\\/]models([\\\\/]|$)/i || resourcePath in dbtRunner.modelPaths) && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
         },
         {
           "command": "dbtRunner.compile",
-          "when": "editorIsOpen && resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models([\\\\/]|$)/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
+          "when": "editorIsOpen && resourceExtname =~ /^\\.sql$/i && (resourcePath =~ /[\\\\/]models([\\\\/]|$)/i || resourcePath in dbtRunner.modelPaths) && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
         },
         {
           "command": "dbtRunner.preview",
-          "when": "editorIsOpen && resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models([\\\\/]|$)/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
+          "when": "editorIsOpen && resourceExtname =~ /^\\.sql$/i && (resourcePath =~ /[\\\\/]models([\\\\/]|$)/i || resourcePath in dbtRunner.modelPaths) && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
         },
         {
           "command": "dbtRunner.menu",
@@ -322,11 +334,11 @@
         },
         {
           "command": "dbtRunner.seedFiles",
-          "when": "editorIsOpen && resourceExtname =~ /^\\.csv$/i && resourcePath =~ /[\\\\/]seeds[\\\\/]/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
+          "when": "editorIsOpen && resourceExtname =~ /^\\.csv$/i && (resourcePath =~ /[\\\\/]seeds[\\\\/]/i || resourcePath in dbtRunner.seedPaths) && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
         },
         {
           "command": "dbtRunner.generateYaml",
-          "when": "editorIsOpen && resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models([\\\\/]|$)/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
+          "when": "editorIsOpen && resourceExtname =~ /^\\.sql$/i && (resourcePath =~ /[\\\\/]models([\\\\/]|$)/i || resourcePath in dbtRunner.modelPaths) && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
         },
         {
           "command": "dbtRunner.tree.run",
@@ -354,7 +366,7 @@
         },
         {
           "command": "dbtRunner.showLineage",
-          "when": "editorIsOpen && resourceScheme == file && resourcePath not =~ /[\\\\/](dbt_packages|target)[\\\\/]/i && ((resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/](models|snapshots)[\\\\/]/i) || (resourceExtname =~ /^\\.csv$/i && resourcePath =~ /[\\\\/]seeds[\\\\/]/i))"
+          "when": "editorIsOpen && resourceScheme == file && resourcePath not =~ /[\\\\/](dbt_packages|target)[\\\\/]/i && ((resourceExtname =~ /^\\.sql$/i && (resourcePath =~ /[\\\\/](models|snapshots)[\\\\/]/i || resourcePath in dbtRunner.modelPaths || resourcePath in dbtRunner.snapshotPaths)) || (resourceExtname =~ /^\\.csv$/i && (resourcePath =~ /[\\\\/]seeds[\\\\/]/i || resourcePath in dbtRunner.seedPaths)))"
         },
         {
           "command": "dbtRunner.tree.snapshotAll",
@@ -392,6 +404,16 @@
           "command": "dbtRunner.lineage.followEditor",
           "when": "view == dbtRunner.lineage && dbtRunner.lineagePinned",
           "group": "navigation@1"
+        },
+        {
+          "command": "dbtRunner.retry",
+          "when": "view == dbtRunner.lastRun && dbtRunner.lastRunFailed",
+          "group": "navigation@1"
+        },
+        {
+          "command": "dbtRunner.rerunLast",
+          "when": "view == dbtRunner.lastRun",
+          "group": "navigation@2"
         }
       ],
       "view/item/context": [
@@ -540,6 +562,12 @@
           "type": "boolean",
           "default": true,
           "description": "Open the static docs page in your browser after dbt docs generate."
+        },
+        "dbtRunner.notifyAfterSeconds": {
+          "type": "number",
+          "default": 30,
+          "minimum": 0,
+          "description": "Show a notification with the results when a dbt command takes at least this many seconds (0 = never)."
         }
       }
     },
@@ -565,31 +593,36 @@
         "command": "dbtRunner.build",
         "key": "ctrl+' b",
         "mac": "cmd+' b",
-        "when": "resourceScheme == file && editorTextFocus && resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models([\\\\/]|$)/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
+        "when": "resourceScheme == file && editorTextFocus && resourceExtname =~ /^\\.sql$/i && (resourcePath =~ /[\\\\/]models([\\\\/]|$)/i || resourcePath in dbtRunner.modelPaths) && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
       },
       {
         "command": "dbtRunner.run",
         "key": "ctrl+' r",
         "mac": "cmd+' r",
-        "when": "resourceScheme == file && editorTextFocus && resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models([\\\\/]|$)/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
+        "when": "resourceScheme == file && editorTextFocus && resourceExtname =~ /^\\.sql$/i && (resourcePath =~ /[\\\\/]models([\\\\/]|$)/i || resourcePath in dbtRunner.modelPaths) && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
       },
       {
         "command": "dbtRunner.test",
         "key": "ctrl+' t",
         "mac": "cmd+' t",
-        "when": "resourceScheme == file && editorTextFocus && resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models([\\\\/]|$)/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
+        "when": "resourceScheme == file && editorTextFocus && resourceExtname =~ /^\\.sql$/i && (resourcePath =~ /[\\\\/]models([\\\\/]|$)/i || resourcePath in dbtRunner.modelPaths) && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
       },
       {
         "command": "dbtRunner.compile",
         "key": "ctrl+' c",
         "mac": "cmd+' c",
-        "when": "resourceScheme == file && editorTextFocus && resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models([\\\\/]|$)/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
+        "when": "resourceScheme == file && editorTextFocus && resourceExtname =~ /^\\.sql$/i && (resourcePath =~ /[\\\\/]models([\\\\/]|$)/i || resourcePath in dbtRunner.modelPaths) && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
       },
       {
         "command": "dbtRunner.preview",
         "key": "ctrl+' p",
         "mac": "cmd+' p",
-        "when": "resourceScheme == file && editorTextFocus && resourceExtname =~ /^\\.sql$/i && resourcePath =~ /[\\\\/]models([\\\\/]|$)/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
+        "when": "resourceScheme == file && editorTextFocus && resourceExtname =~ /^\\.sql$/i && (resourcePath =~ /[\\\\/]models([\\\\/]|$)/i || resourcePath in dbtRunner.modelPaths) && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
+      },
+      {
+        "command": "dbtRunner.rerunLast",
+        "key": "ctrl+' l",
+        "mac": "cmd+' l"
       }
     ],
     "viewsContainers": {
@@ -611,6 +644,11 @@
         {
           "id": "dbtRunner.lineage",
           "name": "Lineage",
+          "contextualTitle": "dbt"
+        },
+        {
+          "id": "dbtRunner.lastRun",
+          "name": "Last run",
           "contextualTitle": "dbt"
         }
       ]
