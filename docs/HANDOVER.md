@@ -1,7 +1,7 @@
 # dbt Runner — developer handover
 
 Keep this file current: update it in the same commit as any change to features, architecture, build/release
-process, or known issues. Last updated: 2026-11-21 (v0.7 committed; v0.8 complete, awaiting commit).
+process, or known issues. Last updated: 2026-11-21 (v0.7 and v0.8 committed, neither released).
 
 ## What this is
 A VS Code extension (TypeScript) for working with **dbt-core 1.x** (tested with 1.12.7) on **Windows**, running
@@ -11,7 +11,7 @@ https://github.com/razjir-bote/vscode-dbt-runner — releases ship a `.vsix` (no
 ## Status
 - Released: **v0.6.1** (installed locally as `local.dbt-runner@0.6.1`).
 - On `main`, unreleased: `8da435f` — sidebar multi-select Build + Upstream / Downstream.
-- **v0.8 (version 0.8.0, implemented and reviewed, awaiting the user's commit decision):** dbt debug
+- **v0.8 (version 0.8.0, committed `2ba6749`, unreleased):** dbt debug
   (`checkConnection`, only debug-safe flags via `debugArgs`), rename model (`projectedits.ts` + pure
   `refactor.ts`: WorkspaceEdit with refactor preview; skips other packages' refs and versioned models; renames
   `models:` / `unit_tests:` YAML entries incl. indentless lists), staging model from a source and new model
