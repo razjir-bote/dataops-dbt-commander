@@ -33,6 +33,7 @@ import { DbtTests } from './testing';
 import { DbtLineage } from './lineage';
 import { RunStatusStore } from './runstatus';
 import { DbtLastRun } from './lastrun';
+import { MIGRATED_KEYS, Scope, plannedMigrations } from './migrate';
 import { EditDeps, checkConnection, createStagingModel, newModel, openInDocs, renameModel } from './projectedits';
 
 let statusItem: vscode.StatusBarItem;
@@ -48,7 +49,7 @@ const isDir = (p: string) => {
     return false;
   }
 };
-const cfg = () => vscode.workspace.getConfiguration('dbtRunner');
+const cfg = () => vscode.workspace.getConfiguration('dbtCommander');
 const workspaceFolderOf = (p: string) => vscode.workspace.getWorkspaceFolder(vscode.Uri.file(p));
 const stopAt = (p: string) => workspaceFolderOf(p)?.uri.fsPath;
 
@@ -157,7 +158,7 @@ let pathKeys: { model: Record<string, true>; seed: Record<string, true>; snapsho
 
 /**
  * Publish each project's model / seed / snapshot folders and files (from dbt_project.yml, so custom names like
- * `model-paths: [transform]` work) for menu conditions: `resourcePath in dbtRunner.modelPaths`.
+ * `model-paths: [transform]` work) for menu conditions: `resourcePath in dbtCommander.modelPaths`.
  */
 async function publishPathKeys(): Promise<void> {
   const keys: typeof pathKeys = { model: {}, seed: {}, snapshot: {} };
@@ -190,9 +191,9 @@ async function publishPathKeys(): Promise<void> {
   }
   pathKeys = keys;
   await Promise.all([
-    vscode.commands.executeCommand('setContext', 'dbtRunner.modelPaths', keys.model),
-    vscode.commands.executeCommand('setContext', 'dbtRunner.seedPaths', keys.seed),
-    vscode.commands.executeCommand('setContext', 'dbtRunner.snapshotPaths', keys.snapshot)
+    vscode.commands.executeCommand('setContext', 'dbtCommander.modelPaths', keys.model),
+    vscode.commands.executeCommand('setContext', 'dbtCommander.seedPaths', keys.seed),
+    vscode.commands.executeCommand('setContext', 'dbtCommander.snapshotPaths', keys.snapshot)
   ]);
 }
 
@@ -209,7 +210,7 @@ async function requireExe(): Promise<string | undefined> {
   // dbt executes project code (macros, hooks) against the warehouse: only in trusted workspaces.
   if (!vscode.workspace.isTrusted) {
     const choice = await vscode.window.showErrorMessage(
-      'dbt Runner: dbt only runs in trusted workspaces, because dbt executes the project’s macros and hooks.',
+      'dbt Commander: dbt only runs in trusted workspaces, because dbt executes the project’s macros and hooks.',
       'Manage Workspace Trust'
     );
     if (choice) {
@@ -220,7 +221,7 @@ async function requireExe(): Promise<string | undefined> {
   const exe = dbtExecutable(cfg().get<string>('venvPath', ''), exists);
   if (!exe) {
     const choice = await vscode.window.showErrorMessage(
-      'dbt Runner: dbt executable not found. Set the venv path in dbt Runner settings.',
+      'dbt Commander: dbt executable not found. Set the venv path in dbt Commander settings.',
       'Open Settings'
     );
     if (choice === 'Open Settings') {
@@ -273,10 +274,10 @@ async function resolveSelection(
   if (paths.length === 0) {
     void vscode.window.showErrorMessage(
       kind === 'seed'
-        ? 'dbt Runner: select one or more seed .csv files or folders.'
+        ? 'dbt Commander: select one or more seed .csv files or folders.'
         : kind === 'buildable'
-          ? 'dbt Runner: select one or more models, seeds or folders.'
-          : `dbt Runner: select one or more .sql models${allowFolders ? ' or model folders' : ''}.`
+          ? 'dbt Commander: select one or more models, seeds or folders.'
+          : `dbt Commander: select one or more .sql models${allowFolders ? ' or model folders' : ''}.`
     );
     return undefined;
   }
@@ -286,12 +287,12 @@ async function resolveSelection(
   if (orphans.length) {
     const shown = orphans.map(o => (path.basename(o) === '_' && isDir(path.dirname(o)) ? path.basename(path.dirname(o)) + '/' : path.basename(o)));
     void vscode.window.showErrorMessage(
-      `dbt Runner: ${shown.join(', ')} is not inside a dbt project (no dbt_project.yml in it or above it). Right-click a folder inside your dbt project.`
+      `dbt Commander: ${shown.join(', ')} is not inside a dbt project (no dbt_project.yml in it or above it). Right-click a folder inside your dbt project.`
     );
     return undefined;
   }
   if (projects.size > 1) {
-    void vscode.window.showErrorMessage('dbt Runner: selection spans several dbt projects. Run them separately.');
+    void vscode.window.showErrorMessage('dbt Commander: selection spans several dbt projects. Run them separately.');
     return undefined;
   }
   const root = [...projects.keys()][0];
@@ -317,7 +318,7 @@ async function runDbt(action: DbtAction, graph: GraphScope, uri?: vscode.Uri, ur
   // The project folder itself = everything (no selector); with upstream/downstream that has no meaning.
   const selectors = graph === 'none' ? folderSelectors(sel.root, sel.paths) : graphSelectors(sel.root, sel.paths, graph);
   if (!selectors) {
-    void vscode.window.showErrorMessage('dbt Runner: upstream / downstream needs models, seeds or folders inside the project, not the whole project.');
+    void vscode.window.showErrorMessage('dbt Commander: upstream / downstream needs models, seeds or folders inside the project, not the whole project.');
     return;
   }
   const exe = await requireExe();
@@ -416,12 +417,12 @@ async function generateYaml(uri?: vscode.Uri, retried = false): Promise<void> {
   const entry = (await loadManifest(languageDeps, sel.root))?.models.find(m => m.file.toLowerCase() === modelFile.toLowerCase());
   if (entry?.version !== undefined) {
     void vscode.window.showInformationMessage(
-      `dbt Runner: ${path.basename(modelFile)} is version ${entry.version} of the versioned model ${entry.name}; Generate YAML doesn't support versioned models yet.`
+      `dbt Commander: ${path.basename(modelFile)} is version ${entry.version} of the versioned model ${entry.name}; Generate YAML doesn't support versioned models yet.`
     );
     return;
   }
   if (entry?.materialized === 'ephemeral') {
-    void vscode.window.showInformationMessage(`dbt Runner: ${entry.name} is ephemeral, so it has no table or view to read columns from.`);
+    void vscode.window.showInformationMessage(`dbt Commander: ${entry.name} is ephemeral, so it has no table or view to read columns from.`);
     return;
   }
   const model = entry?.name ?? modelName(modelFile);
@@ -429,10 +430,10 @@ async function generateYaml(uri?: vscode.Uri, retried = false): Promise<void> {
   if (!columns.length) {
     const why = error ? `dbt could not read the columns of ${model}:\n${error.slice(0, 600)}` : `No columns found for ${model} — it may not be built yet.`;
     if (retried) {
-      void vscode.window.showWarningMessage(`dbt Runner: ${why}`);
+      void vscode.window.showWarningMessage(`dbt Commander: ${why}`);
       return;
     }
-    const choice = await vscode.window.showWarningMessage(`dbt Runner: ${why}`, 'Build & retry');
+    const choice = await vscode.window.showWarningMessage(`dbt Commander: ${why}`, 'Build & retry');
     if (choice) {
       const code = await runDbtTask({
         exe,
@@ -453,7 +454,7 @@ async function generateYaml(uri?: vscode.Uri, retried = false): Promise<void> {
   try {
     await writeModelYaml(sel.root, modelFile, model, columns);
   } catch (err) {
-    void vscode.window.showErrorMessage(`dbt Runner: could not write YAML for ${model}: ${err instanceof Error ? err.message : String(err)}`);
+    void vscode.window.showErrorMessage(`dbt Commander: could not write YAML for ${model}: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -485,7 +486,7 @@ async function writeModelYaml(root: string, modelFile: string, model: string, co
     }
   }
   if (edit.size && !(await vscode.workspace.applyEdit(edit))) {
-    void vscode.window.showErrorMessage(`dbt Runner: could not edit ${target.file}`);
+    void vscode.window.showErrorMessage(`dbt Commander: could not edit ${target.file}`);
     return;
   }
   const doc = await vscode.workspace.openTextDocument(fileUri);
@@ -493,7 +494,7 @@ async function writeModelYaml(root: string, modelFile: string, model: string, co
   const ed = await vscode.window.showTextDocument(doc, { preview: false });
   ed.revealRange(new vscode.Range(line, 0, line, 0), vscode.TextEditorRevealType.AtTop);
   ed.selection = new vscode.Selection(line, 0, line, 0);
-  void vscode.window.showInformationMessage(`dbt Runner: ${message}.${edit.size ? ' Review and save the file.' : ''}`);
+  void vscode.window.showInformationMessage(`dbt Commander: ${message}.${edit.size ? ' Review and save the file.' : ''}`);
 }
 
 /** `dbt seed --select path:seeds/<file>.csv ...` for the selected seed CSVs. */
@@ -537,7 +538,7 @@ async function compileModel(uri?: vscode.Uri): Promise<void> {
   const project = readProject(sel.root);
   const compiled = compiledPath(sel.root, project.name ?? path.basename(sel.root), project.targetPath, file);
   if (!exists(compiled)) {
-    void vscode.window.showWarningMessage(`dbt Runner: compiled file not found at ${compiled}`);
+    void vscode.window.showWarningMessage(`dbt Commander: compiled file not found at ${compiled}`);
     return;
   }
   await vscode.window.showTextDocument(vscode.Uri.file(compiled), { viewColumn: vscode.ViewColumn.Beside, preview: true, preserveFocus: true });
@@ -590,7 +591,7 @@ async function projectCommand(
 ): Promise<{ root: string; code: number | undefined } | undefined> {
   const root = forRoot ?? (await pickProjectRoot(true));
   if (!root) {
-    void vscode.window.showErrorMessage('dbt Runner: no dbt project (dbt_project.yml) found in this workspace.');
+    void vscode.window.showErrorMessage('dbt Commander: no dbt project (dbt_project.yml) found in this workspace.');
     return undefined;
   }
   const exe = await requireExe();
@@ -612,13 +613,13 @@ async function docsGenerate(): Promise<void> {
   }
   const page = path.join(targetDirOf(result.root), 'static_index.html');
   if (!exists(page)) {
-    void vscode.window.showWarningMessage(`dbt Runner: static docs page not found at ${page}`);
+    void vscode.window.showWarningMessage(`dbt Commander: static docs page not found at ${page}`);
     return;
   }
   if (cfg().get<boolean>('openDocsAfterGenerate', true)) {
     await vscode.env.openExternal(vscode.Uri.file(page));
   } else {
-    void vscode.window.showInformationMessage(`dbt Runner: docs written to ${page}`);
+    void vscode.window.showInformationMessage(`dbt Commander: docs written to ${page}`);
   }
 }
 
@@ -648,15 +649,15 @@ async function selectTarget(): Promise<void> {
 async function showMenu(): Promise<void> {
   void refreshStatus(); // dbt may have been installed into the venv since the last check
   const items: (vscode.QuickPickItem & { command: string })[] = [
-    { label: '$(debug-restart) Rerun last command', command: 'dbtRunner.rerunLast' },
-    { label: '$(plug) Check connection (dbt debug)', command: 'dbtRunner.debug' },
-    { label: '$(refresh) dbt retry', description: 'rerun only what failed last time', command: 'dbtRunner.retry' },
-    { label: '$(package) dbt deps', command: 'dbtRunner.deps' },
-    { label: '$(table) dbt seed', command: 'dbtRunner.seed' },
-    { label: '$(history) dbt snapshot', command: 'dbtRunner.snapshot' },
-    { label: '$(book) dbt docs generate', description: 'build static docs and open in browser', command: 'dbtRunner.docsGenerate' },
-    { label: '$(target) Switch target…', command: 'dbtRunner.selectTarget' },
-    { label: '$(gear) Settings', command: 'dbtRunner.openSettings' }
+    { label: '$(debug-restart) Rerun last command', command: 'dbtCommander.rerunLast' },
+    { label: '$(plug) Check connection (dbt debug)', command: 'dbtCommander.debug' },
+    { label: '$(refresh) dbt retry', description: 'rerun only what failed last time', command: 'dbtCommander.retry' },
+    { label: '$(package) dbt deps', command: 'dbtCommander.deps' },
+    { label: '$(table) dbt seed', command: 'dbtCommander.seed' },
+    { label: '$(history) dbt snapshot', command: 'dbtCommander.snapshot' },
+    { label: '$(book) dbt docs generate', description: 'build static docs and open in browser', command: 'dbtCommander.docsGenerate' },
+    { label: '$(target) Switch target…', command: 'dbtCommander.selectTarget' },
+    { label: '$(gear) Settings', command: 'dbtCommander.openSettings' }
   ];
   const pick = await vscode.window.showQuickPick(items, { placeHolder: statusItem.tooltip?.toString().split('\n')[0] });
   if (pick) {
@@ -689,7 +690,7 @@ async function refreshStatus(): Promise<void> {
   const venv = cfg().get<string>('venvPath', '');
   if (!venv.trim()) {
     statusItem.text = '$(gear) dbt: not configured';
-    statusItem.tooltip = 'dbt Runner: set the dbt venv';
+    statusItem.tooltip = 'dbt Commander: set the dbt venv';
     statusItem.backgroundColor = undefined;
     return;
   }
@@ -703,7 +704,7 @@ async function refreshStatus(): Promise<void> {
     statusItem.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
   } else if (info.major !== 1) {
     statusItem.text = `$(warning) dbt ${info.version}`;
-    statusItem.tooltip = `dbt ${info.version} detected; dbt Runner supports dbt-core 1.x only.`;
+    statusItem.tooltip = `dbt ${info.version} detected; dbt Commander supports dbt-core 1.x only.`;
     statusItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
   } else {
     statusItem.text = `$(database) dbt ${info.version}`;
@@ -736,7 +737,7 @@ async function runNodes(items: DbtItem[], action: 'test' | 'snapshot'): Promise<
   }
   const roots = new Set(nodes.map(n => n.root));
   if (roots.size > 1) {
-    void vscode.window.showErrorMessage('dbt Runner: selection spans several dbt projects. Run them separately.');
+    void vscode.window.showErrorMessage('dbt Commander: selection spans several dbt projects. Run them separately.');
     return;
   }
   const exe = await requireExe();
@@ -801,6 +802,7 @@ export interface DbtRunnerApi {
   lastRun: DbtLastRun;
   pathKeys: () => typeof pathKeys;
   publishPathKeys: () => Promise<void>;
+  migrateSettings: () => Promise<number>;
   /** The v0.8 edit commands with their inputs given directly (no input box / refactor preview), for tests. */
   projectEdits: {
     rename(target: unknown, name: string, preview?: boolean): Promise<boolean>;
@@ -823,15 +825,41 @@ function runCaptured(exe: string, args: string[], cwd: string, title: string): P
   );
 }
 
+/**
+ * One-time move of settings saved under the extension's old name (`dbtRunner.*`) to `dbtCommander.*`, for user
+ * and workspace settings. Old values are left in place; a value already set under the new name wins.
+ */
+async function migrateSettings(): Promise<number> {
+  const all = vscode.workspace.getConfiguration();
+  const now = vscode.workspace.getConfiguration('dbtCommander');
+  const value = (i: ReturnType<typeof all.inspect>, scope: Scope) => (scope === 'global' ? i?.globalValue : i?.workspaceValue);
+  const plan = plannedMigrations(
+    MIGRATED_KEYS,
+    (scope, key) => value(all.inspect(`dbtRunner.${key}`), scope),
+    (scope, key) => value(now.inspect(key), scope)
+  ).filter(p => p.scope === 'global' || vscode.workspace.workspaceFolders?.length);
+  for (const p of plan) {
+    await now.update(p.key, p.value, p.scope === 'global' ? vscode.ConfigurationTarget.Global : vscode.ConfigurationTarget.Workspace);
+  }
+  return plan.length;
+}
+
 export function activate(ctx: vscode.ExtensionContext): DbtRunnerApi {
   context = ctx;
   diagnostics = new DbtDiagnostics(vscode.languages.createDiagnosticCollection('dbt'));
+  // Settings from before the rename (dbt Runner → DataOps dbt Commander); then refresh what depends on them.
+  void migrateSettings().then(n => {
+    if (n) {
+      void refreshStatus();
+      void refreshTarget();
+    }
+  });
 
   statusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);
-  statusItem.command = 'dbtRunner.menu';
+  statusItem.command = 'dbtCommander.menu';
   statusItem.show();
   targetItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 49);
-  targetItem.command = 'dbtRunner.selectTarget';
+  targetItem.command = 'dbtCommander.selectTarget';
 
   const runCommands: [string, DbtAction, GraphScope][] = [
     ['run', 'run', 'none'],
@@ -843,7 +871,7 @@ export function activate(ctx: vscode.ExtensionContext): DbtRunnerApi {
   ];
   for (const [id, action, graph] of runCommands) {
     ctx.subscriptions.push(
-      vscode.commands.registerCommand(`dbtRunner.${id}`, (uri?: vscode.Uri, uris?: vscode.Uri[]) => runDbt(action, graph, uri, uris))
+      vscode.commands.registerCommand(`dbtCommander.${id}`, (uri?: vscode.Uri, uris?: vscode.Uri[]) => runDbt(action, graph, uri, uris))
     );
   }
 
@@ -851,23 +879,23 @@ export function activate(ctx: vscode.ExtensionContext): DbtRunnerApi {
     statusItem,
     targetItem,
     diagnostics,
-    vscode.commands.registerCommand('dbtRunner.compile', (uri?: vscode.Uri) => compileModel(uri)),
-    vscode.commands.registerCommand('dbtRunner.seedFiles', (uri?: vscode.Uri, uris?: vscode.Uri[]) => seedFiles(uri, uris)),
-    vscode.commands.registerCommand('dbtRunner.generateYaml', (uri?: vscode.Uri) => generateYaml(uri)),
-    vscode.commands.registerCommand('dbtRunner.preview', (uri?: vscode.Uri) => previewModel(uri)),
-    vscode.commands.registerCommand('dbtRunner.deps', () => projectCommand(['deps'], 'deps')),
-    vscode.commands.registerCommand('dbtRunner.seed', () => projectCommand(['seed'], 'seed')),
-    vscode.commands.registerCommand('dbtRunner.snapshot', () => projectCommand(['snapshot'], 'snapshot')),
-    vscode.commands.registerCommand('dbtRunner.docsGenerate', docsGenerate),
-    vscode.commands.registerCommand('dbtRunner.selectTarget', selectTarget),
-    vscode.commands.registerCommand('dbtRunner.menu', showMenu),
-    vscode.commands.registerCommand('dbtRunner.openSettings', openSettings),
+    vscode.commands.registerCommand('dbtCommander.compile', (uri?: vscode.Uri) => compileModel(uri)),
+    vscode.commands.registerCommand('dbtCommander.seedFiles', (uri?: vscode.Uri, uris?: vscode.Uri[]) => seedFiles(uri, uris)),
+    vscode.commands.registerCommand('dbtCommander.generateYaml', (uri?: vscode.Uri) => generateYaml(uri)),
+    vscode.commands.registerCommand('dbtCommander.preview', (uri?: vscode.Uri) => previewModel(uri)),
+    vscode.commands.registerCommand('dbtCommander.deps', () => projectCommand(['deps'], 'deps')),
+    vscode.commands.registerCommand('dbtCommander.seed', () => projectCommand(['seed'], 'seed')),
+    vscode.commands.registerCommand('dbtCommander.snapshot', () => projectCommand(['snapshot'], 'snapshot')),
+    vscode.commands.registerCommand('dbtCommander.docsGenerate', docsGenerate),
+    vscode.commands.registerCommand('dbtCommander.selectTarget', selectTarget),
+    vscode.commands.registerCommand('dbtCommander.menu', showMenu),
+    vscode.commands.registerCommand('dbtCommander.openSettings', openSettings),
     vscode.workspace.onDidChangeConfiguration(e => {
-      if (e.affectsConfiguration('dbtRunner.venvPath')) {
+      if (e.affectsConfiguration('dbtCommander.venvPath')) {
         clearManifestCache(); // macro paths into the venv change with it
         void refreshStatus();
       }
-      if (e.affectsConfiguration('dbtRunner.target') || e.affectsConfiguration('dbtRunner.extraArgs')) {
+      if (e.affectsConfiguration('dbtCommander.target') || e.affectsConfiguration('dbtCommander.extraArgs')) {
         void refreshTarget();
       }
     }),
@@ -887,24 +915,24 @@ export function activate(ctx: vscode.ExtensionContext): DbtRunnerApi {
   registerLanguageFeatures(ctx, languageDeps, runStatus);
 
   const lastRunView = new DbtLastRun(languageDeps, runStatus);
-  lastRunView.view = vscode.window.createTreeView('dbtRunner.lastRun', { treeDataProvider: lastRunView });
+  lastRunView.view = vscode.window.createTreeView('dbtCommander.lastRun', { treeDataProvider: lastRunView });
   ctx.subscriptions.push(
     lastRunView,
     lastRunView.view,
     // dbt retry: rerun only what failed / was skipped in the last run, in that run's project.
-    vscode.commands.registerCommand('dbtRunner.retry', async (forRoot?: unknown) => {
+    vscode.commands.registerCommand('dbtCommander.retry', async (forRoot?: unknown) => {
       // From a notification: the project that run was in. Otherwise the latest run's project.
       const root = (typeof forRoot === 'string' && forRoot) || runStatus.lastRun?.root || (await pickProjectRoot(true));
       if (!root || !exists(path.join(targetDirOf(root), 'run_results.json'))) {
-        void vscode.window.showInformationMessage('dbt Runner: there is no previous dbt run to retry.');
+        void vscode.window.showInformationMessage('dbt Commander: there is no previous dbt run to retry.');
         return;
       }
       await projectCommand(['retry'], 'retry', root);
     }),
-    vscode.commands.registerCommand('dbtRunner.rerunLast', async () => {
+    vscode.commands.registerCommand('dbtCommander.rerunLast', async () => {
       const last = lastRunOptions();
       if (!last) {
-        void vscode.window.showInformationMessage('dbt Runner: no dbt command has been run yet in this window.');
+        void vscode.window.showInformationMessage('dbt Commander: no dbt command has been run yet in this window.');
         return;
       }
       await runDbtTask(last);
@@ -936,32 +964,32 @@ export function activate(ctx: vscode.ExtensionContext): DbtRunnerApi {
   const sidebar = new DbtSidebar(languageDeps, runStatus);
   ctx.subscriptions.push(
     sidebar,
-    vscode.window.createTreeView('dbtRunner.project', { treeDataProvider: sidebar, showCollapseAll: true, canSelectMany: true }),
-    vscode.commands.registerCommand('dbtRunner.refreshSidebar', () => sidebar.refresh()),
-    vscode.commands.registerCommand('dbtRunner.parse', async (item?: DbtItem) => {
+    vscode.window.createTreeView('dbtCommander.project', { treeDataProvider: sidebar, showCollapseAll: true, canSelectMany: true }),
+    vscode.commands.registerCommand('dbtCommander.refreshSidebar', () => sidebar.refresh()),
+    vscode.commands.registerCommand('dbtCommander.parse', async (item?: DbtItem) => {
       await projectCommand(['parse'], 'parse', item?.root);
       sidebar.refresh();
     }),
     // VS Code passes (clicked item, selected items): act on the whole Ctrl/Shift-click selection, in one dbt
     // command. Section items carry their target folders (data.targets); everything else its resourceUri.
-    vscode.commands.registerCommand('dbtRunner.tree.run', (item?: DbtItem, selected?: DbtItem[]) =>
+    vscode.commands.registerCommand('dbtCommander.tree.run', (item?: DbtItem, selected?: DbtItem[]) =>
       runDbt('run', 'none', undefined, treeUris(treeSel(item, selected)))
     ),
-    vscode.commands.registerCommand('dbtRunner.tree.build', (item?: DbtItem, selected?: DbtItem[]) =>
+    vscode.commands.registerCommand('dbtCommander.tree.build', (item?: DbtItem, selected?: DbtItem[]) =>
       runDbt('build', 'none', undefined, treeUris(treeSel(item, selected)))
     ),
-    vscode.commands.registerCommand('dbtRunner.tree.test', (item?: DbtItem, selected?: DbtItem[]) =>
+    vscode.commands.registerCommand('dbtCommander.tree.test', (item?: DbtItem, selected?: DbtItem[]) =>
       runDbt('test', 'none', undefined, treeUris(treeSel(item, selected)))
     ),
-    vscode.commands.registerCommand('dbtRunner.tree.seed', (item?: DbtItem, selected?: DbtItem[]) => seedFiles(undefined, treeUris(treeSel(item, selected)))),
+    vscode.commands.registerCommand('dbtCommander.tree.seed', (item?: DbtItem, selected?: DbtItem[]) => seedFiles(undefined, treeUris(treeSel(item, selected)))),
     ...(['upstream', 'downstream', 'both'] as GraphScope[]).map(scope =>
-      vscode.commands.registerCommand(`dbtRunner.tree.build${scope === 'upstream' ? 'Upstream' : scope === 'downstream' ? 'Downstream' : 'UpDownstream'}`, (item?: DbtItem, selected?: DbtItem[]) =>
+      vscode.commands.registerCommand(`dbtCommander.tree.build${scope === 'upstream' ? 'Upstream' : scope === 'downstream' ? 'Downstream' : 'UpDownstream'}`, (item?: DbtItem, selected?: DbtItem[]) =>
         runDbt('build', scope, undefined, treeUris(treeSel(item, selected)))
       )
     ),
-    vscode.commands.registerCommand('dbtRunner.tree.snapshot', (item?: DbtItem, selected?: DbtItem[]) => runNodes(treeSel(item, selected), 'snapshot')),
-    vscode.commands.registerCommand('dbtRunner.tree.runTest', (item?: DbtItem, selected?: DbtItem[]) => runNodes(treeSel(item, selected), 'test')),
-    vscode.commands.registerCommand('dbtRunner.tree.snapshotAll', (item: DbtItem) => projectCommand(['snapshot'], 'snapshot', item.root))
+    vscode.commands.registerCommand('dbtCommander.tree.snapshot', (item?: DbtItem, selected?: DbtItem[]) => runNodes(treeSel(item, selected), 'snapshot')),
+    vscode.commands.registerCommand('dbtCommander.tree.runTest', (item?: DbtItem, selected?: DbtItem[]) => runNodes(treeSel(item, selected), 'test')),
+    vscode.commands.registerCommand('dbtCommander.tree.snapshotAll', (item: DbtItem) => projectCommand(['snapshot'], 'snapshot', item.root))
   );
 
   void refreshStatus();
@@ -977,19 +1005,19 @@ export function activate(ctx: vscode.ExtensionContext): DbtRunnerApi {
   void tests.refresh();
 
   const lineage = new DbtLineage(languageDeps);
-  lineage.view = vscode.window.createTreeView('dbtRunner.lineage', { treeDataProvider: lineage });
+  lineage.view = vscode.window.createTreeView('dbtCommander.lineage', { treeDataProvider: lineage });
   ctx.subscriptions.push(
     lineage,
     lineage.view,
-    vscode.commands.registerCommand('dbtRunner.showLineage', async (target?: unknown) => {
+    vscode.commands.registerCommand('dbtCommander.showLineage', async (target?: unknown) => {
       const uri = asUri(target) ?? vscode.window.activeTextEditor?.document.uri;
       if (!uri || !(await lineage.pin(uri))) {
-        void vscode.window.showInformationMessage('dbt Runner: open a model, seed or snapshot (and run dbt parse) to see its lineage.');
+        void vscode.window.showInformationMessage('dbt Commander: open a model, seed or snapshot (and run dbt parse) to see its lineage.');
         return;
       }
-      await vscode.commands.executeCommand('dbtRunner.lineage.focus');
+      await vscode.commands.executeCommand('dbtCommander.lineage.focus');
     }),
-    vscode.commands.registerCommand('dbtRunner.lineage.followEditor', () => lineage.unpin())
+    vscode.commands.registerCommand('dbtCommander.lineage.followEditor', () => lineage.unpin())
   );
   void lineage.follow(vscode.window.activeTextEditor?.document.uri);
 
@@ -1007,11 +1035,11 @@ export function activate(ctx: vscode.ExtensionContext): DbtRunnerApi {
     asUri
   };
   ctx.subscriptions.push(
-    vscode.commands.registerCommand('dbtRunner.renameModel', (target?: unknown) => renameModel(edits, target)),
-    vscode.commands.registerCommand('dbtRunner.createStaging', (target?: unknown) => createStagingModel(edits, target)),
-    vscode.commands.registerCommand('dbtRunner.newModel', (target?: unknown) => newModel(edits, target)),
-    vscode.commands.registerCommand('dbtRunner.openInDocs', (target?: unknown) => openInDocs(edits, target)),
-    vscode.commands.registerCommand('dbtRunner.debug', () => checkConnection(edits))
+    vscode.commands.registerCommand('dbtCommander.renameModel', (target?: unknown) => renameModel(edits, target)),
+    vscode.commands.registerCommand('dbtCommander.createStaging', (target?: unknown) => createStagingModel(edits, target)),
+    vscode.commands.registerCommand('dbtCommander.newModel', (target?: unknown) => newModel(edits, target)),
+    vscode.commands.registerCommand('dbtCommander.openInDocs', (target?: unknown) => openInDocs(edits, target)),
+    vscode.commands.registerCommand('dbtCommander.debug', () => checkConnection(edits))
   );
 
   return {
@@ -1022,6 +1050,7 @@ export function activate(ctx: vscode.ExtensionContext): DbtRunnerApi {
     lastRun: lastRunView,
     pathKeys: () => pathKeys,
     publishPathKeys,
+    migrateSettings,
     projectEdits: {
       rename: (target, name, preview) => renameModel(edits, target, name, preview),
       createStaging: (target, relPath) => createStagingModel(edits, target, relPath),

@@ -68,4 +68,4 @@ jobs:
             echo "Tag $GITHUB_REF_NAME does not match package.json version $version" >&2
             exit 1
           fi
-          gh release create "$GITHUB_REF_NAME" ./*.vsix --title "dbt Runner $GITHUB_REF_NAME" --generate-notes
+          gh release create "$GITHUB_REF_NAME" ./*.vsix --title "DataOps dbt Commander $GITHUB_REF_NAME" --generate-notes

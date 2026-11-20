@@ -1,4 +1,4 @@
-# dbt Runner (VS Code extension)
+# DataOps dbt Commander (VS Code extension, formerly "dbt Runner")
 
 Read `docs/HANDOVER.md` first: current status, in-progress work, architecture, build/test/release steps,
 lessons learned and working agreements. Keep it updated in the same commit as any change it describes.

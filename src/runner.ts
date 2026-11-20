@@ -103,7 +103,7 @@ export async function runDbtTask(opts: RunOptions): Promise<number | undefined> 
   // never collides with a task VS Code still considers active.
   const finished = new Promise<number | undefined>(resolve => {
     const sub = vscode.tasks.onDidEndTask(e => {
-      if (e.execution.task.definition.type === 'dbtRunner' && e.execution.task.definition.id === id) {
+      if (e.execution.task.definition.type === 'dbtCommander' && e.execution.task.definition.id === id) {
         sub.dispose();
         resolve(exitCode);
       }
@@ -175,7 +175,7 @@ export async function runDbtTask(opts: RunOptions): Promise<number | undefined> 
   });
 
   const task = new vscode.Task(
-    { type: 'dbtRunner', title: opts.title, id },
+    { type: 'dbtCommander', title: opts.title, id },
     opts.folder ?? vscode.TaskScope.Workspace,
     opts.title,
     'dbt',
@@ -202,9 +202,9 @@ function invocationIn(file: string): string | undefined {
   }
 }
 
-/** A notification for runs longer than `dbtRunner.notifyAfterSeconds`, with Retry when something failed. */
+/** A notification for runs longer than `dbtCommander.notifyAfterSeconds`, with Retry when something failed. */
 async function notifyIfLong(opts: RunOptions, ms: number, code: number | undefined, json: string | undefined): Promise<void> {
-  const threshold = vscode.workspace.getConfiguration('dbtRunner').get<number>('notifyAfterSeconds', 30);
+  const threshold = vscode.workspace.getConfiguration('dbtCommander').get<number>('notifyAfterSeconds', 30);
   if (!threshold || ms < threshold * 1000 || code === undefined) {
     return;
   }
@@ -214,8 +214,8 @@ async function notifyIfLong(opts: RunOptions, ms: number, code: number | undefin
   const buttons = [...(failed && summary ? ['Retry'] : []), 'Show results'];
   const pick = await (failed ? vscode.window.showWarningMessage(text, ...buttons) : vscode.window.showInformationMessage(text, ...buttons));
   if (pick === 'Retry') {
-    await vscode.commands.executeCommand('dbtRunner.retry', opts.cwd); // retry *this* run's project
+    await vscode.commands.executeCommand('dbtCommander.retry', opts.cwd); // retry *this* run's project
   } else if (pick === 'Show results') {
-    await vscode.commands.executeCommand('dbtRunner.lastRun.focus');
+    await vscode.commands.executeCommand('dbtCommander.lastRun.focus');
   }
 }

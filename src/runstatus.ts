@@ -4,7 +4,7 @@ import * as path from 'path';
 import { NodeRun, RUN_COMMANDS, mergeResults, rootKey, statusBadge } from './runstate';
 import { RunStatusSource } from './language';
 
-const KEY = 'dbtRunner.runState';
+const KEY = 'dbtCommander.runState';
 
 interface StatusDeps {
   projectRootOf(file: string): string | undefined;

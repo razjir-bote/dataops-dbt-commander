@@ -146,7 +146,7 @@ export class DbtLineage implements vscode.TreeDataProvider<LineageItem>, vscode.
   }
 
   refresh(): void {
-    void vscode.commands.executeCommand('setContext', 'dbtRunner.lineagePinned', this.pinned);
+    void vscode.commands.executeCommand('setContext', 'dbtCommander.lineagePinned', this.pinned);
     this.changed.fire(undefined);
   }
 
@@ -165,7 +165,7 @@ export class DbtLineage implements vscode.TreeDataProvider<LineageItem>, vscode.
         message = `${this.focus?.id.split('.').slice(2).join('.')} is no longer in the manifest. Open a dbt model to see its lineage.`;
         this.pinned = false;
         this.focus = undefined;
-        void vscode.commands.executeCommand('setContext', 'dbtRunner.lineagePinned', false);
+        void vscode.commands.executeCommand('setContext', 'dbtCommander.lineagePinned', false);
       }
       if (this.view) {
         this.view.message = message;

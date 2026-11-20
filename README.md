@@ -1,4 +1,6 @@
-# dbt Runner
+# DataOps dbt Commander
+
+_Formerly "dbt Runner". Settings saved as `dbtRunner.*` are migrated to `dbtCommander.*` automatically._
 
 Run dbt-core 1.x from the VS Code Explorer and editor, using dbt from a Python venv you choose.
 Supports dbt-core 1.x (tested with 1.12); not dbt 2 / Fusion.
@@ -17,13 +19,13 @@ Supports dbt-core 1.x (tested with 1.12); not dbt 2 / Fusion.
 - **Keyboard shortcuts** (while a model is open): `Ctrl+'` then
   `B` build · `R` run · `T` test · `C` compile · `P` preview.
 - **dbt Compile** opens the compiled SQL beside the model.
-- **dbt Preview Data** runs `dbt show` and shows the rows in a table (limit: `dbtRunner.previewLimit`, default 100).
+- **dbt Preview Data** runs `dbt show` and shows the rows in a table (limit: `dbtCommander.previewLimit`, default 100).
 - **Errors in the Problems panel**: compilation/runtime/database errors on the model (with the line when dbt
   gives one), test failures and warnings on the YAML file. A model's problems are replaced when it runs again.
 - **Target switcher** in the status bar, listing the targets from your `profiles.yml`.
 - **Project commands** — `deps`, `seed`, `snapshot`, and `docs generate` (builds the static docs page and opens
-  it in your browser; `dbtRunner.openDocsAfterGenerate`) — from the `dbt` status bar menu or the command palette.
-- **Run links above each model** — `Run · Build · Test · Compile · Preview` (`dbtRunner.codeLens` to turn off).
+  it in your browser; `dbtCommander.openDocsAfterGenerate`) — from the `dbt` status bar menu or the command palette.
+- **Run links above each model** — `Run · Build · Test · Compile · Preview` (`dbtCommander.codeLens` to turn off).
 - **Go to definition** — Ctrl+click / F12 on `ref('model')`, `ref('package', 'model')`, `ref('model', v=2)` opens
   the model; on `source('src', 'table')` opens the sources YAML at that table.
 - **Autocomplete** — model names inside `ref('`, source names inside `source('`, and that source's tables in its
@@ -56,7 +58,7 @@ Supports dbt-core 1.x (tested with 1.12); not dbt 2 / Fusion.
   shows in the sidebar and above each model, from every dbt run including ones in your terminal. The **Last run**
   view lists the latest run's nodes, slowest first. **dbt retry** reruns only what failed (status bar menu, Last
   run view, or the notification). **Rerun last command**: `Ctrl+'` then `L` (not while the terminal has focus).
-  Runs longer than `dbtRunner.notifyAfterSeconds` (default 30) end with a notification.
+  Runs longer than `dbtCommander.notifyAfterSeconds` (default 30) end with a notification.
 - **Column autocomplete** — after `from {{ ref('orders') }} o`, typing `o.` lists the model's columns.
 - **Find references** — Shift+F12 on `ref('orders')` or in `orders.sql` lists everything that refs it.
 - **Custom folders** — `model-paths`, `seed-paths`, `snapshot-paths` and `packages-install-path` from
@@ -66,7 +68,7 @@ Supports dbt-core 1.x (tested with 1.12); not dbt 2 / Fusion.
   preview. Versioned models and per-model settings in `dbt_project.yml` are not renamed.
 - **dbt Create staging model** (right-click a source table, or on a `source()` call) — creates
   `stg_<source>__<table>.sql` selecting the table's columns (read from the warehouse) and its YAML entry.
-- **dbt New model…** (right-click a model folder) — creates a model from a template (`dbtRunner.newModelTemplate`,
+- **dbt New model…** (right-click a model folder) — creates a model from a template (`dbtCommander.newModelTemplate`,
   `{{name}}` placeholder) with a YAML entry.
 - **Open in dbt docs** — jumps to a model's / source's / seed's / exposure's page in the static docs site
   (generated on first use).
@@ -78,15 +80,15 @@ parse — so they reflect your last dbt command. Without a manifest, `ref()` sti
 
 ## Setup
 
-1. Install the `.vsix` from the [Releases](https://github.com/razjir-bote/vscode-dbt-runner/releases) page:
-   `code --install-extension dbt-runner-<version>.vsix`
+1. Install the `.vsix` from the [Releases](https://github.com/razjir-bote/dataops-dbt-commander/releases) page:
+   `code --install-extension dataops-dbt-commander-<version>.vsix`
 2. Click **dbt: not configured** in the status bar → **Settings**, browse to your venv (the folder containing
    `Scripts\dbt.exe`), check the detected version shows dbt-core 1.x, and Save.
 
 Settings are saved per workspace. Extra flags apply to every command except `deps`
 (quotes keep values together, e.g. `--vars '{"key": "value"}'`).
 
-dbt runs your project's macros and hooks, so dbt Runner only runs in **trusted** workspaces, and in untrusted
+dbt runs your project's macros and hooks, so DataOps dbt Commander only runs in **trusted** workspaces, and in untrusted
 ones the venv path, target and extra flags are read from your user settings only.
 
 ## Development

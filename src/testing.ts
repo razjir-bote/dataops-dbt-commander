@@ -35,7 +35,7 @@ interface TestData {
 
 /** dbt tests in VS Code's Testing panel: project → model / source / singular group → test. */
 export class DbtTests implements vscode.Disposable {
-  readonly controller = vscode.tests.createTestController('dbtRunner.tests', 'dbt');
+  readonly controller = vscode.tests.createTestController('dbtCommander.tests', 'dbt');
   private data = new Map<string, TestData>(); // test item id → test
   private projects = new Map<string, string>(); // project item id → root
   private readonly disposables: vscode.Disposable[] = [];

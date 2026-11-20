@@ -21,7 +21,7 @@ export class PreviewPanel {
   /** Show (or reuse) the preview panel in a loading state. */
   static loading(model: string, onRefresh: () => void): PreviewPanel {
     if (!PreviewPanel.current) {
-      const panel = vscode.window.createWebviewPanel('dbtRunnerPreview', `Preview: ${model}`, vscode.ViewColumn.Beside, {
+      const panel = vscode.window.createWebviewPanel('dbtCommanderPreview', `Preview: ${model}`, vscode.ViewColumn.Beside, {
         enableScripts: true,
         localResourceRoots: []
       });

@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { LanguageDeps, inProjectPaths, loadManifest } from './language';
-import { TextEdit, isValidModelName, renameRefEdits, renameYamlEdits } from './refactor';
+import { TextEdit, isValidModelName, renameRefEdits, renameYamlEdits, takenModelNames } from './refactor';
 import { debugArgs, debugSummary, docsFragment, docsRedirectHtml, newModelSql, stagingName, stagingSql } from './scaffold';
 import { Column } from './yamlgen';
 import { callAt } from './jinja';
@@ -60,7 +60,7 @@ export async function renameModel(deps: EditDeps, target?: unknown, newName?: st
   const uri = deps.asUri(target) ?? vscode.window.activeTextEditor?.document.uri;
   const file = uri?.fsPath;
   if (!uri || !file || !/\.sql$/i.test(file) || !inProjectPaths(deps.language, file, ['model'])) {
-    void vscode.window.showErrorMessage('dbt Runner: pick a model (.sql file in your model folders) to rename.');
+    void vscode.window.showErrorMessage('dbt Commander: pick a model (.sql file in your model folders) to rename.');
     return false;
   }
   const root = deps.language.projectRootOf(file)!;
@@ -69,11 +69,11 @@ export async function renameModel(deps: EditDeps, target?: unknown, newName?: st
   const node = index?.models.find(m => m.file.toLowerCase() === file.toLowerCase());
   if (node?.version !== undefined) {
     // orders_v2.sql is version 2 of `orders`: renaming one file would split the versioned model.
-    void vscode.window.showErrorMessage(`dbt Runner: ${path.basename(file)} is version ${node.version} of the versioned model ${node.name}; renaming versioned models isn't supported yet.`);
+    void vscode.window.showErrorMessage(`dbt Commander: ${path.basename(file)} is version ${node.version} of the versioned model ${node.name}; renaming versioned models isn't supported yet.`);
     return false;
   }
   const oldName = node?.name ?? path.basename(file, path.extname(file));
-  const taken = new Set((index?.models ?? []).filter(m => m.package === pkg).map(m => m.name.toLowerCase()));
+  const taken = takenModelNames(index?.models ?? [], pkg, exists);
   const targetFile = (n: string) => path.join(path.dirname(file), `${n}.sql`);
   const problem = (v: string) =>
     !isValidModelName(v)
@@ -96,7 +96,7 @@ export async function renameModel(deps: EditDeps, target?: unknown, newName?: st
   }
   const why = problem(name);
   if (why) {
-    void vscode.window.showErrorMessage(`dbt Runner: ${why}`);
+    void vscode.window.showErrorMessage(`dbt Commander: ${why}`);
     return false;
   }
 
@@ -123,7 +123,7 @@ export async function renameModel(deps: EditDeps, target?: unknown, newName?: st
   const ok = await vscode.workspace.applyEdit(edit, { isRefactoring: true });
   if (ok) {
     void vscode.window.showInformationMessage(
-      `dbt Runner: renamed ${oldName} → ${name} (${changes} reference${changes === 1 ? '' : 's'}). ` +
+      `dbt Commander: renamed ${oldName} → ${name} (${changes} reference${changes === 1 ? '' : 's'}). ` +
         `Per-model settings under models: in dbt_project.yml are not renamed — check them if ${oldName} had any.`
     );
   }
@@ -150,7 +150,7 @@ function sourceOf(target: unknown): { source: string; table: string; file?: stri
 export async function createStagingModel(deps: EditDeps, target?: unknown, relPathArg?: string): Promise<string | undefined> {
   const src = sourceOf(target);
   if (!src) {
-    void vscode.window.showErrorMessage("dbt Runner: pick a source table (sidebar) or put the cursor on a source('…', '…') call.");
+    void vscode.window.showErrorMessage("dbt Commander: pick a source table (sidebar) or put the cursor on a source('…', '…') call.");
     return undefined;
   }
   const t = target as { root?: string } | undefined;
@@ -174,7 +174,7 @@ export async function createStagingModel(deps: EditDeps, target?: unknown, relPa
   }
   const file = path.join(root, ...rel.split('/'));
   if (exists(file)) {
-    void vscode.window.showErrorMessage(`dbt Runner: ${rel} already exists.`);
+    void vscode.window.showErrorMessage(`dbt Commander: ${rel} already exists.`);
     return undefined;
   }
   const exe = await deps.requireExe();
@@ -196,14 +196,14 @@ export async function createStagingModel(deps: EditDeps, target?: unknown, relPa
   }
   await vscode.window.showTextDocument(vscode.Uri.file(file), { preview: false });
   if (!columns.length) {
-    void vscode.window.showWarningMessage(`dbt Runner: created ${model} with select * — the source's columns couldn't be read from the warehouse.`);
+    void vscode.window.showWarningMessage(`dbt Commander: created ${model} with select * — the source's columns couldn't be read from the warehouse.`);
   }
   return file;
 }
 
 // ---------- new model ----------
 
-/** Create `<folder>/<name>.sql` from the template (setting `dbtRunner.newModelTemplate`) plus a YAML entry. */
+/** Create `<folder>/<name>.sql` from the template (setting `dbtCommander.newModelTemplate`) plus a YAML entry. */
 export async function newModel(deps: EditDeps, target?: unknown, nameArg?: string): Promise<string | undefined> {
   const folder = deps.asUri(target)?.fsPath;
   let isDir = false;
@@ -214,7 +214,7 @@ export async function newModel(deps: EditDeps, target?: unknown, nameArg?: strin
   }
   const root = folder ? deps.language.projectRootOf(path.join(folder, '_')) : undefined;
   if (!folder || !isDir || !root) {
-    void vscode.window.showErrorMessage('dbt Runner: right-click a folder in your dbt project to create a model in it.');
+    void vscode.window.showErrorMessage('dbt Commander: right-click a folder in your dbt project to create a model in it.');
     return undefined;
   }
   const name =
@@ -229,12 +229,12 @@ export async function newModel(deps: EditDeps, target?: unknown, nameArg?: strin
     return undefined;
   }
   let template: string | undefined;
-  const setting = vscode.workspace.getConfiguration('dbtRunner').get<string>('newModelTemplate', '').trim();
+  const setting = vscode.workspace.getConfiguration('dbtCommander').get<string>('newModelTemplate', '').trim();
   if (setting) {
     try {
       template = fs.readFileSync(path.isAbsolute(setting) ? setting : path.join(root, setting), 'utf8');
     } catch {
-      void vscode.window.showWarningMessage(`dbt Runner: template ${setting} not found — using the built-in one.`);
+      void vscode.window.showWarningMessage(`dbt Commander: template ${setting} not found — using the built-in one.`);
     }
   }
   const file = path.join(folder, `${name}.sql`);
@@ -287,7 +287,7 @@ async function nodeOf(deps: EditDeps, target: unknown): Promise<{ root: string; 
 export async function openInDocs(deps: EditDeps, target?: unknown): Promise<string | undefined> {
   const found = await nodeOf(deps, target);
   if (!found) {
-    void vscode.window.showErrorMessage('dbt Runner: pick a model, source, seed, snapshot or exposure (and run dbt parse first).');
+    void vscode.window.showErrorMessage('dbt Commander: pick a model, source, seed, snapshot or exposure (and run dbt parse first).');
     return undefined;
   }
   const targetDir = deps.language.targetDirOf(found.root);
@@ -312,18 +312,18 @@ export async function openInDocs(deps: EditDeps, target?: unknown): Promise<stri
     const result = await deps.projectCommand(['docs', 'generate', '--static'], 'docs generate', found.root);
     if (!result || result.code !== 0 || !exists(page)) {
       void vscode.window.showErrorMessage(
-        'dbt Runner: dbt docs generate --static failed (it needs dbt-core 1.7 or later) — see the terminal for details.'
+        'dbt Commander: dbt docs generate --static failed (it needs dbt-core 1.7 or later) — see the terminal for details.'
       );
       return undefined;
     }
   }
   const url = `static_index.html#${docsFragment(found.id)}`;
-  const redirect = path.join(targetDir, 'dbt_runner_docs.html');
+  const redirect = path.join(targetDir, 'dbt_commander_docs.html');
   fs.writeFileSync(redirect, docsRedirectHtml(url));
-  if (vscode.workspace.getConfiguration('dbtRunner').get<boolean>('openDocsAfterGenerate', true)) {
+  if (vscode.workspace.getConfiguration('dbtCommander').get<boolean>('openDocsAfterGenerate', true)) {
     await vscode.env.openExternal(vscode.Uri.file(redirect));
   } else {
-    void vscode.window.showInformationMessage(`dbt Runner: docs page is ${page}#${docsFragment(found.id)}`);
+    void vscode.window.showInformationMessage(`dbt Commander: docs page is ${page}#${docsFragment(found.id)}`);
   }
   return `${page}#${docsFragment(found.id)}`;
 }

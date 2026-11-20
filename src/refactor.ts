@@ -7,6 +7,14 @@ export interface TextEdit {
   text: string;
 }
 
+/**
+ * Model names already used in the project (lower-cased). Manifest entries whose file no longer exists don't
+ * count: right after a rename the manifest is stale and still lists the old name until dbt parses again.
+ */
+export function takenModelNames(models: { name: string; package: string; file: string }[], pkg: string, exists: (f: string) => boolean): Set<string> {
+  return new Set(models.filter(m => m.package === pkg && exists(m.file)).map(m => m.name.toLowerCase()));
+}
+
 export function isValidModelName(name: string): boolean {
   return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name);
 }

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as path from 'path';
-import { isValidModelName, renameRefEdits, renameYamlEdits } from '../refactor';
+import { isValidModelName, renameRefEdits, renameYamlEdits, takenModelNames } from '../refactor';
 import { debugArgs, debugSummary, docsFragment, docsRedirectHtml, newModelSql, stagingName, stagingSql } from '../scaffold';
 import { parseManifest } from '../manifest';
 import { appendModel, newModelYaml } from '../yamlgen';
@@ -99,6 +99,16 @@ test('docsRedirectHtml escapes the target for the attribute and the script', () 
 test('stagingSql quotes column names that need it, via the adapter', () => {
   const sql = stagingSql('raw', 'orders', ['id', 'Order Id', 'select']);
   assert.match(sql, /        id,\n        \{\{ adapter\.quote\('Order Id'\) \}\},\n        \{\{ adapter\.quote\('select'\) \}\}\n/);
+});
+
+test('takenModelNames ignores manifest models whose file is gone (stale manifest right after a rename)', () => {
+  const models = [
+    { name: 'b', package: 'demo', file: 'C:/p/models/b.sql' }, // renamed away: file no longer exists
+    { name: 'b_renamed', package: 'demo', file: 'C:/p/models/b_renamed.sql' },
+    { name: 'helper', package: 'pkg', file: 'C:/p/dbt_packages/pkg/models/helper.sql' }
+  ];
+  const exists = (f: string) => f !== 'C:/p/models/b.sql';
+  assert.deepEqual([...takenModelNames(models, 'demo', exists)].sort(), ['b_renamed']);
 });
 
 test('isValidModelName', () => {

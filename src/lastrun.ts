@@ -44,7 +44,7 @@ export class DbtLastRun implements vscode.TreeDataProvider<LastRunItem>, vscode.
     }
     const last = this.store.lastRun;
     const summary = last ? runSummary(last.json) : undefined;
-    void vscode.commands.executeCommand('setContext', 'dbtRunner.lastRunFailed', !!summary && summary.errors > 0);
+    void vscode.commands.executeCommand('setContext', 'dbtCommander.lastRunFailed', !!summary && summary.errors > 0);
     if (!last || !summary) {
       if (this.view) {
         this.view.message = 'No dbt run yet.';

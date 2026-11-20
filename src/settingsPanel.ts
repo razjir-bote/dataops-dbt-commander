@@ -49,7 +49,7 @@ export class SettingsPanel {
       void p.sendState(true);
       return;
     }
-    const panel = vscode.window.createWebviewPanel('dbtRunnerSettings', 'dbt Runner Settings', vscode.ViewColumn.Active, {
+    const panel = vscode.window.createWebviewPanel('dbtCommanderSettings', 'dbt Commander Settings', vscode.ViewColumn.Active, {
       enableScripts: true,
       retainContextWhenHidden: true,
       localResourceRoots: []
@@ -78,7 +78,7 @@ export class SettingsPanel {
 
   /** `soft`: the panel was reopened; the webview keeps unsaved edits instead of overwriting them. */
   private async sendState(soft = false): Promise<void> {
-    const cfg = vscode.workspace.getConfiguration('dbtRunner');
+    const cfg = vscode.workspace.getConfiguration('dbtCommander');
     const state = {
       venvPath: cfg.get<string>('venvPath', ''),
       target: cfg.get<string>('target', ''),
@@ -112,7 +112,7 @@ export class SettingsPanel {
         await this.check(String(msg.venvPath ?? ''));
         break;
       case 'save': {
-        const cfg = vscode.workspace.getConfiguration('dbtRunner');
+        const cfg = vscode.workspace.getConfiguration('dbtCommander');
         const target = settingsTarget();
         // A cleared field removes the setting instead of storing "".
         const value = (v: unknown) => String(v ?? '').trim() || undefined;
@@ -125,7 +125,7 @@ export class SettingsPanel {
           break;
         }
         // A field cleared here may still be set at a broader level (e.g. User settings) — say so.
-        const after = vscode.workspace.getConfiguration('dbtRunner');
+        const after = vscode.workspace.getConfiguration('dbtCommander');
         const labels: Record<string, string> = { venvPath: 'venv path', target: 'target', extraArgs: 'extra flags' };
         const inherited = Object.keys(labels).filter(k => !value(msg[k]) && String(after.get(k) ?? '').trim());
         const note = inherited.length
@@ -152,7 +152,7 @@ export class SettingsPanel {
 <meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy" content="${csp}">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>dbt Runner Settings</title>
+<title>dbt Commander Settings</title>
 <style>
   body { font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); color: var(--vscode-foreground); padding: 16px 24px; max-width: 720px; }
   h1 { font-size: 1.4em; font-weight: 600; margin: 0 0 4px; }
@@ -177,7 +177,7 @@ export class SettingsPanel {
 </style>
 </head>
 <body>
-  <h1>dbt Runner</h1>
+  <h1>DataOps dbt Commander</h1>
   <p class="sub">Settings are saved to this workspace.</p>
 
   <div class="field">

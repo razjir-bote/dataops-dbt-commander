@@ -1,17 +1,24 @@
-# dbt Runner — developer handover
+# DataOps dbt Commander — developer handover
 
 Keep this file current: update it in the same commit as any change to features, architecture, build/release
-process, or known issues. Last updated: 2026-11-21 (v0.7 and v0.8 committed, neither released).
+process, or known issues. Last updated: 2026-11-21 (renamed to DataOps dbt Commander, v0.9.0, new repo).
 
 ## What this is
 A VS Code extension (TypeScript) for working with **dbt-core 1.x** (tested with 1.12.7) on **Windows**, running
 dbt from a **Python venv** the user picks in a settings panel. Not for dbt 2 / Fusion. Public repo:
-https://github.com/razjir-bote/vscode-dbt-runner — releases ship a `.vsix` (not on the Marketplace).
+https://github.com/razjir-bote/dataops-dbt-commander — releases ship a `.vsix` (not on the Marketplace).
+Formerly **dbt Runner** (repo https://github.com/razjir-bote/vscode-dbt-runner, left as it was: releases v0.1–v0.6.1;
+its v0.8.0 tag has no release because that CI run failed). The new repo has the full history but none of the old tags.
+Git remotes in the working copy: `origin` = new repo, `legacy` = old repo.
+Since v0.9.0 the extension ID is `local.dataops-dbt-commander` and every command / setting / view / context key
+is `dbtCommander.*`; `migrate.ts` copies old `dbtRunner.*` user and workspace settings once on activation.
 
 ## Status
-- Released: **v0.6.1** (installed locally as `local.dbt-runner@0.6.1`).
-- On `main`, unreleased: `8da435f` — sidebar multi-select Build + Upstream / Downstream.
-- **v0.8 (version 0.8.0, committed `2ba6749`, unreleased):** dbt debug
+- **v0.9.0** (being released from the new repo): the rename to DataOps dbt Commander (`dbtCommander.*` IDs,
+  settings migration) plus everything from v0.7 and v0.8, and a fix found by CI: rename refused to rename back
+  right after a rename because the stale manifest still listed the old name (`takenModelNames` now ignores
+  manifest entries whose file is gone). Previously released: v0.6.1 (old repo).
+- **v0.8 (version 0.8.0, committed `2ba6749`):** dbt debug
   (`checkConnection`, only debug-safe flags via `debugArgs`), rename model (`projectedits.ts` + pure
   `refactor.ts`: WorkspaceEdit with refactor preview; skips other packages' refs and versioned models; renames
   `models:` / `unit_tests:` YAML entries incl. indentless lists), staging model from a source and new model
@@ -20,15 +27,15 @@ https://github.com/razjir-bote/vscode-dbt-runner — releases ship a `.vsix` (no
   site only when the page lacks the node; opens through `target/dbt_runner_docs.html`). Integration: 55 checks
   passed before the review fixes; the fixes were verified with typecheck + unit tests (113).
 - **v0.7 (version 0.7.0, committed `8e131cb`, unreleased):** custom
-  `model-paths`/`seed-paths`/`snapshot-paths` (published as context keys `dbtRunner.modelPaths` etc. and used in
+  `model-paths`/`seed-paths`/`snapshot-paths` (published as context keys `dbtCommander.modelPaths` etc. and used in
   package.json `when` clauses via `resourcePath in …`), custom `packages-install-path` (packages are never treated
   as projects: `isUnderPackages`), `dbt retry`, rerun last command (`Ctrl+'` `L`), long-run notification
-  (`dbtRunner.notifyAfterSeconds`), last-run badges (sidebar + CodeLens, `RunStatusStore` in workspace state),
+  (`dbtCommander.notifyAfterSeconds`), last-run badges (sidebar + CodeLens, `RunStatusStore` in workspace state),
   Last run view, column autocomplete after `alias.`, find references. Integration suite: 49 checks passed before
   the review fixes; the review fixes were checked with typecheck + unit tests (98) only.
 - Not done from the v0.8 review (minor): renaming Python models / flow-style YAML, renaming per-model config in
   dbt_project.yml (the rename message points this out), semantic models open at line 0 in Lineage.
-- Deferred from the v0.7 review: pruning the persisted run state (`dbtRunner.runState` grows with renamed /
+- Deferred from the v0.7 review: pruning the persisted run state (`dbtCommander.runState` grows with renamed /
   deleted nodes); `Ctrl+'` `L` doesn't reach VS Code while the terminal has focus.
 
 ## Build, test, release
@@ -98,7 +105,7 @@ Design docs per version: `docs/superpowers/specs/`, plans: `docs/superpowers/pla
 - **Integration flakiness:** VS Code's `executeCodeLensProvider` can throw "Illegal argument" right after
   `closeAllEditors` — open the document first. New files get CRLF from VS Code on Windows.
 - Opening a browser from tests: `openExternal` can't be stubbed from the suite; the workspace setting
-  `dbtRunner.openDocsAfterGenerate=false` is used instead.
+  `dbtCommander.openDocsAfterGenerate=false` is used instead.
 
 ## Working agreements with the user
 - New features: short design doc → user approves → plan → implement here (TDD for pure logic) → fresh reviewer

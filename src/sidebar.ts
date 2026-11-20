@@ -138,7 +138,7 @@ export class DbtSidebar implements vscode.TreeDataProvider<DbtItem>, vscode.Disp
     if (!index) {
       const it = new DbtItem('No manifest yet — click to run dbt parse', 'noManifest', root, None);
       it.iconPath = new vscode.ThemeIcon('info');
-      it.command = { command: 'dbtRunner.parse', title: 'dbt parse', arguments: [it] };
+      it.command = { command: 'dbtCommander.parse', title: 'dbt parse', arguments: [it] };
       return [it];
     }
     const pkg = this.rootPackage(root);

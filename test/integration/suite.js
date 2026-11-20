@@ -20,17 +20,38 @@ exports.run = async () => {
   const file = (...p) => path.join(root, ...p);
   const results = () => JSON.parse(fs.readFileSync(file('target', 'run_results.json'), 'utf8')).results.map(r => r.unique_id).sort();
   const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const run = (cmd, ...p) => vscode.commands.executeCommand(`dbtRunner.${cmd}`, uri(...p), [uri(...p)]);
+  const run = (cmd, ...p) => vscode.commands.executeCommand(`dbtCommander.${cmd}`, uri(...p), [uri(...p)]);
   const same = (a, b) => path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
 
-  const api = await vscode.extensions.getExtension('local.dbt-runner').activate();
+  const api = await vscode.extensions.getExtension('local.dataops-dbt-commander').activate();
   // v0.8 commands with their inputs given directly (no input boxes / refactor preview in tests).
   const createStaging = (item, rel) => api.projectEdits.createStaging(item, rel);
   const newModelIn = (folderUri, name) => api.projectEdits.newModel(folderUri, name);
   const rename = (u, name) => api.projectEdits.rename(u, name, false);
-  const cfg = () => vscode.workspace.getConfiguration('dbtRunner');
+  const cfg = () => vscode.workspace.getConfiguration('dbtCommander');
 
   await step('venv setting read from workspace', async () => assert.ok(fs.existsSync(cfg().get('venvPath'))));
+
+  await step('settings saved under the old name (dbtRunner.*) are migrated to dbtCommander.*', async () => {
+    const settingsFile = file('.vscode', 'settings.json');
+    const original = fs.readFileSync(settingsFile, 'utf8');
+    const s = JSON.parse(original);
+    s['dbtRunner.previewLimit'] = 7;
+    fs.writeFileSync(settingsFile, JSON.stringify(s, null, 2));
+    try {
+      const end = Date.now() + 8000;
+      while (vscode.workspace.getConfiguration().inspect('dbtRunner.previewLimit')?.workspaceValue !== 7) {
+        if (Date.now() > end) throw new Error('old setting never loaded');
+        await sleep(200);
+      }
+      assert.equal(await api.migrateSettings(), 1);
+      assert.equal(cfg().get('previewLimit'), 7);
+      assert.equal(await api.migrateSettings(), 0, 'migrated twice');
+    } finally {
+      await cfg().update('previewLimit', undefined, vscode.ConfigurationTarget.Workspace);
+      fs.writeFileSync(settingsFile, original);
+    }
+  });
 
   await step('build single model (right-click)', async () => {
     await run('build', 'models', 'b.sql');
@@ -60,13 +81,13 @@ exports.run = async () => {
     const ed = await vscode.window.showTextDocument(doc);
     await ed.edit(e => e.insert(new vscode.Position(0, 0), '-- edited\n'));
     assert.ok(doc.isDirty);
-    await vscode.commands.executeCommand('dbtRunner.run'); // no uri: active editor (▶ / shortcut path)
+    await vscode.commands.executeCommand('dbtCommander.run'); // no uri: active editor (▶ / shortcut path)
     assert.ok(!doc.isDirty, 'document still dirty');
     assert.deepEqual(results(), ['model.demo.b']);
   });
 
   await step('compile opens compiled SQL beside', async () => {
-    await vscode.commands.executeCommand('dbtRunner.compile', uri('models', 'b.sql'));
+    await vscode.commands.executeCommand('dbtCommander.compile', uri('models', 'b.sql'));
     await sleep(500);
     const compiled = file('target', 'compiled', 'demo', 'models', 'b.sql');
     const ed = vscode.window.visibleTextEditors.find(e => same(e.document.uri.fsPath, compiled));
@@ -155,7 +176,7 @@ exports.run = async () => {
     await sleep(1500);
     const text = vscode.window.activeTextEditor.document.getText();
     assert.ok(text.length > 10000, 'default keybindings not loaded');
-    const keys = [...text.matchAll(/"key":\s*"([^"]+)",\s*"command":\s*"([^"]+)"/g)].filter(m => !m[2].startsWith('dbtRunner.')).map(m => m[1]);
+    const keys = [...text.matchAll(/"key":\s*"([^"]+)",\s*"command":\s*"([^"]+)"/g)].filter(m => !m[2].startsWith('dbtCommander.')).map(m => m[1]);
     const ours = require(path.resolve(__dirname, '..', '..', 'package.json')).contributes.keybindings.map(k => k.key);
     const clash = ours.filter(k => keys.includes(k) || keys.includes(k.split(' ')[0]));
     assert.deepEqual(clash, []);
@@ -170,7 +191,7 @@ exports.run = async () => {
   });
 
   await step('preview runs; runtime keeps big integers exact', async () => {
-    await vscode.commands.executeCommand('dbtRunner.preview', uri('models', 'b.sql'));
+    await vscode.commands.executeCommand('dbtCommander.preview', uri('models', 'b.sql'));
     let source;
     JSON.parse('[12345678901234567890]', (k, v, ctx) => (k === '0' && (source = ctx && ctx.source), v));
     assert.equal(source, '12345678901234567890', 'JSON.parse source text access unavailable in this VS Code');
@@ -230,7 +251,7 @@ exports.run = async () => {
     const lenses = await vscode.commands.executeCommand('vscode.executeCodeLensProvider', uri('models', 'b.sql'));
     // A model that has run also gets a status badge lens first (no command); the actions follow.
     const cmds = lenses.map(l => l.command && l.command.command).filter(Boolean);
-    assert.deepEqual(cmds, ['dbtRunner.run', 'dbtRunner.build', 'dbtRunner.test', 'dbtRunner.compile', 'dbtRunner.preview']);
+    assert.deepEqual(cmds, ['dbtCommander.run', 'dbtCommander.build', 'dbtCommander.test', 'dbtCommander.compile', 'dbtCommander.preview']);
     const none = await vscode.commands.executeCommand('vscode.executeCodeLensProvider', uri('analyses', 'from_source.sql'));
     assert.equal(none.length, 0, 'lenses shown outside models/');
   });
@@ -255,7 +276,7 @@ exports.run = async () => {
 
   await step('generate YAML: appends a model to the folder yml', async () => {
     const before = fs.readFileSync(file('models', 'schema.yml'), 'utf8');
-    await vscode.commands.executeCommand('dbtRunner.generateYaml', uri('models', 'c.sql'));
+    await vscode.commands.executeCommand('dbtCommander.generateYaml', uri('models', 'c.sql'));
     const text = await docText(file('models', 'schema.yml'));
     assert.ok(text.startsWith(before.replace(/\s+$/, '')), 'existing lines of schema.yml changed');
     assert.match(text, /- name: b[\s\S]*- name: c\s/);
@@ -264,7 +285,7 @@ exports.run = async () => {
   });
 
   await step('generate YAML: creates <model>.yml when the folder has none', async () => {
-    await vscode.commands.executeCommand('dbtRunner.generateYaml', uri('models', 'staging', 'stg_a.sql'));
+    await vscode.commands.executeCommand('dbtCommander.generateYaml', uri('models', 'staging', 'stg_a.sql'));
     const f = file('models', 'staging', 'stg_a.yml');
     // VS Code applies the editor's line endings (CRLF by default on Windows) to inserted text.
     assert.match(await docText(f), /^version: 2\r?\n\r?\nmodels:\r?\n  - name: stg_a\r?\n/);
@@ -279,7 +300,7 @@ exports.run = async () => {
     edit.replace(doc.uri, new vscode.Range(doc.positionAt(0), doc.positionAt(doc.getText().length)), 'version: 2\nmodels:\n  - name: stg_a\n    description: "staging a" # keep me\n');
     await vscode.workspace.applyEdit(edit);
     await doc.save();
-    await vscode.commands.executeCommand('dbtRunner.generateYaml', uri('models', 'staging', 'stg_a.sql'));
+    await vscode.commands.executeCommand('dbtCommander.generateYaml', uri('models', 'staging', 'stg_a.sql'));
     const text = await docText(f);
     assert.match(text, /# keep me/);
     assert.match(text, /description: "?staging a"?/);
@@ -295,7 +316,7 @@ exports.run = async () => {
   };
 
   await step('sidebar: sections, model folders, sources, seeds, tests', async () => {
-    await vscode.commands.executeCommand('dbtRunner.parse'); // pick up the new YAML
+    await vscode.commands.executeCommand('dbtCommander.parse'); // pick up the new YAML
     const top = await api.sidebar.getChildren();
     assert.deepEqual(labels(top), ['Models', 'Sources', 'Seeds', 'Snapshots', 'Tests']);
     const models = await api.sidebar.getChildren(await child(top, 'Models'));
@@ -313,13 +334,13 @@ exports.run = async () => {
   await step('sidebar: run a model, build a folder, run a test', async () => {
     const top = await api.sidebar.getChildren();
     const models = await api.sidebar.getChildren(await child(top, 'Models'));
-    await vscode.commands.executeCommand('dbtRunner.tree.run', await child(models, 'b'));
+    await vscode.commands.executeCommand('dbtCommander.tree.run', await child(models, 'b'));
     assert.deepEqual(results(), ['model.demo.b']);
-    await vscode.commands.executeCommand('dbtRunner.tree.build', await child(models, 'staging'));
+    await vscode.commands.executeCommand('dbtCommander.tree.build', await child(models, 'staging'));
     assert.deepEqual(results(), ['model.demo.stg_a']);
     const groups = await api.sidebar.getChildren(await child(top, 'Tests'));
     const tests = await api.sidebar.getChildren(await child(groups, 'b'));
-    await vscode.commands.executeCommand('dbtRunner.tree.runTest', tests[0]);
+    await vscode.commands.executeCommand('dbtCommander.tree.runTest', tests[0]);
     assert.equal(results().length, 1);
     assert.match(results()[0], /^test\.demo\.not_null_b_id/);
   });
@@ -333,19 +354,19 @@ exports.run = async () => {
     assert.ok(same(seedsSection.resourceUri.fsPath, file('seeds')));
     const ref = await child(await api.sidebar.getChildren(seedsSection), 'ref');
     assert.equal(ref.contextValue, 'seedFolder');
-    await vscode.commands.executeCommand('dbtRunner.tree.seed', ref);
+    await vscode.commands.executeCommand('dbtCommander.tree.seed', ref);
     assert.deepEqual(results(), ['seed.demo.countries']);
-    await vscode.commands.executeCommand('dbtRunner.tree.build', ref);
+    await vscode.commands.executeCommand('dbtCommander.tree.build', ref);
     assert.deepEqual(results(), ['seed.demo.countries']);
-    await vscode.commands.executeCommand('dbtRunner.tree.seed', seedsSection);
+    await vscode.commands.executeCommand('dbtCommander.tree.seed', seedsSection);
     assert.deepEqual(results(), ['seed.demo.countries', 'seed.demo.s']);
     const models = await child(top, 'Models');
     assert.equal(models.contextValue, 'section-models');
-    await vscode.commands.executeCommand('dbtRunner.tree.run', models);
+    await vscode.commands.executeCommand('dbtCommander.tree.run', models);
     assert.deepEqual(results(), ['model.demo.b', 'model.demo.c', 'model.demo.stg_a']);
     const snaps = await child(top, 'Snapshots');
     assert.equal(snaps.contextValue, 'section-snapshots');
-    await vscode.commands.executeCommand('dbtRunner.tree.snapshotAll', snaps);
+    await vscode.commands.executeCommand('dbtCommander.tree.snapshotAll', snaps);
     assert.deepEqual(results(), ['snapshot.demo.snap']);
   });
 
@@ -357,11 +378,11 @@ exports.run = async () => {
     const [s, refFolder] = [await child(seeds, 's'), await child(seeds, 'ref')];
 
     // Run on two models: VS Code passes (clicked item, selection).
-    await vscode.commands.executeCommand('dbtRunner.tree.run', b, [b, c]);
+    await vscode.commands.executeCommand('dbtCommander.tree.run', b, [b, c]);
     assert.deepEqual(results(), ['model.demo.b', 'model.demo.c']);
 
     // Build a model, a model folder and a seed folder together.
-    await vscode.commands.executeCommand('dbtRunner.tree.build', b, [b, stagingFolder, refFolder]);
+    await vscode.commands.executeCommand('dbtCommander.tree.build', b, [b, stagingFolder, refFolder]);
     const r = results();
     for (const id of ['model.demo.b', 'model.demo.stg_a', 'seed.demo.countries']) {
       assert.ok(r.includes(id), `${id} missing from ${r.join(',')}`);
@@ -369,24 +390,24 @@ exports.run = async () => {
     assert.ok(!r.includes('model.demo.c') && !r.includes('seed.demo.s'), 'built more than selected: ' + r.join(','));
 
     // Seed a seed and a seed folder.
-    await vscode.commands.executeCommand('dbtRunner.tree.seed', s, [s, refFolder]);
+    await vscode.commands.executeCommand('dbtCommander.tree.seed', s, [s, refFolder]);
     assert.deepEqual(results(), ['seed.demo.countries', 'seed.demo.s']);
 
     // A button on a row that isn't part of the selection acts on that row only.
-    await vscode.commands.executeCommand('dbtRunner.tree.run', c, [b, stagingFolder]);
+    await vscode.commands.executeCommand('dbtCommander.tree.run', c, [b, stagingFolder]);
     assert.deepEqual(results(), ['model.demo.c']);
 
     // Build on a single seed (seeds are buildable now).
-    await vscode.commands.executeCommand('dbtRunner.tree.build', s, [s]);
+    await vscode.commands.executeCommand('dbtCommander.tree.build', s, [s]);
     assert.deepEqual(results(), ['seed.demo.s']);
 
     // Upstream / downstream on a selection: one command, graph operators on each selected item.
-    await vscode.commands.executeCommand('dbtRunner.tree.buildDownstream', stagingFolder, [stagingFolder]);
+    await vscode.commands.executeCommand('dbtCommander.tree.buildDownstream', stagingFolder, [stagingFolder]);
     let g = results();
     for (const id of ['model.demo.stg_a', 'model.demo.b', 'model.demo.c', 'snapshot.demo.snap']) {
       assert.ok(g.includes(id), `downstream: ${id} missing from ${g.join(',')}`);
     }
-    await vscode.commands.executeCommand('dbtRunner.tree.buildUpstream', c, [c, s]);
+    await vscode.commands.executeCommand('dbtCommander.tree.buildUpstream', c, [c, s]);
     g = results();
     for (const id of ['model.demo.stg_a', 'model.demo.b', 'model.demo.c', 'seed.demo.s']) {
       assert.ok(g.includes(id), `upstream: ${id} missing from ${g.join(',')}`);
@@ -396,7 +417,7 @@ exports.run = async () => {
     // The project folder has no "upstream": refused, nothing runs.
     const rr = file('target', 'run_results.json');
     const before = fs.statSync(rr).mtimeMs;
-    await vscode.commands.executeCommand('dbtRunner.tree.buildUpstream', { resourceUri: vscode.Uri.file(root), data: {} }, undefined);
+    await vscode.commands.executeCommand('dbtCommander.tree.buildUpstream', { resourceUri: vscode.Uri.file(root), data: {} }, undefined);
     assert.equal(fs.statSync(rr).mtimeMs, before, 'dbt ran for upstream of the whole project');
   });
 
@@ -423,7 +444,7 @@ exports.run = async () => {
   });
 
   await step('lineage: pin a model, ignore other editors, follow again', async () => {
-    await vscode.commands.executeCommand('dbtRunner.showLineage', uri('models', 'c.sql'));
+    await vscode.commands.executeCommand('dbtCommander.showLineage', uri('models', 'c.sql'));
     assert.deepEqual([api.lineage.current.id, api.lineage.current.pinned], ['model.demo.c', true]);
     await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri('models', 'staging', 'stg_a.sql')));
     await api.lineage.follow(uri('models', 'staging', 'stg_a.sql'));
@@ -432,7 +453,7 @@ exports.run = async () => {
     assert.deepEqual(labels(t.upKids), ['b']);
     const bUp = await api.lineage.getChildren(t.upKids[0]);
     assert.deepEqual(labels(bUp), ['stg_a'], 'expanding b upstream');
-    await vscode.commands.executeCommand('dbtRunner.lineage.followEditor');
+    await vscode.commands.executeCommand('dbtCommander.lineage.followEditor');
     assert.deepEqual([api.lineage.current.id, api.lineage.current.pinned], ['model.demo.stg_a', false]);
     await api.lineage.follow(uri('macros', 'money.sql')); // not a node: keeps the current one
     assert.equal(api.lineage.current.id, 'model.demo.stg_a');
@@ -502,7 +523,7 @@ exports.run = async () => {
     } finally {
       fs.unlinkSync(file('models', 'dup.sql'));
       fs.unlinkSync(file('models', 'dup.yml'));
-      await vscode.commands.executeCommand('dbtRunner.parse');
+      await vscode.commands.executeCommand('dbtCommander.parse');
     }
   });
 
@@ -542,11 +563,11 @@ exports.run = async () => {
     const bad = file('models', 'zz_bad.sql');
     fs.writeFileSync(bad, 'select * from does_not_exist\n');
     try {
-      await vscode.commands.executeCommand('dbtRunner.build', vscode.Uri.file(file('models')), [vscode.Uri.file(file('models'))]);
+      await vscode.commands.executeCommand('dbtCommander.build', vscode.Uri.file(file('models')), [vscode.Uri.file(file('models'))]);
       assert.ok(results().includes('model.demo.zz_bad'));
       await waitFor('error badge', () => (api.runStatus.badge(root, 'model.demo.zz_bad') || '').startsWith('✗ error'));
       fs.writeFileSync(bad, 'select 1 as id\n');
-      await vscode.commands.executeCommand('dbtRunner.retry');
+      await vscode.commands.executeCommand('dbtCommander.retry');
       assert.deepEqual(results(), ['model.demo.zz_bad']);
       await waitFor('fixed badge', () => (api.runStatus.badge(root, 'model.demo.zz_bad') || '').startsWith('✓'));
     } finally {
@@ -555,7 +576,7 @@ exports.run = async () => {
     await run('run', 'models', 'b.sql');
     const rr = file('target', 'run_results.json');
     const firstInvocation = JSON.parse(fs.readFileSync(rr, 'utf8')).metadata.invocation_id;
-    await vscode.commands.executeCommand('dbtRunner.rerunLast');
+    await vscode.commands.executeCommand('dbtCommander.rerunLast');
     const again = JSON.parse(fs.readFileSync(rr, 'utf8'));
     assert.notEqual(again.metadata.invocation_id, firstInvocation, 'rerun did not run dbt');
     assert.deepEqual(results(), ['model.demo.b']);
@@ -616,18 +637,18 @@ exports.run = async () => {
       await api.publishPathKeys();
       const keys = api.pathKeys().model;
       for (const p of [file('transform'), file('transform', 'sub'), file('transform', 'sub', 't.sql'), file('models', 'b.sql')]) {
-        assert.ok(keys[vscode.Uri.file(p).fsPath], `${p} missing from dbtRunner.modelPaths`);
+        assert.ok(keys[vscode.Uri.file(p).fsPath], `${p} missing from dbtCommander.modelPaths`);
       }
       // Open it first: VS Code's codelens command can throw "Illegal argument" for unopened documents.
       await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.file(file('transform', 'sub', 't.sql'))));
       const lenses = await vscode.commands.executeCommand('vscode.executeCodeLensProvider', vscode.Uri.file(file('transform', 'sub', 't.sql')));
       assert.ok(lenses.length >= 5, 'no CodeLens in the custom model folder');
-      await vscode.commands.executeCommand('dbtRunner.build', vscode.Uri.file(file('transform')), [vscode.Uri.file(file('transform'))]);
+      await vscode.commands.executeCommand('dbtCommander.build', vscode.Uri.file(file('transform')), [vscode.Uri.file(file('transform'))]);
       assert.deepEqual(results(), ['model.demo.t']);
     } finally {
       fs.writeFileSync(projectFile, original);
       fs.rmSync(file('transform'), { recursive: true, force: true });
-      await vscode.commands.executeCommand('dbtRunner.parse');
+      await vscode.commands.executeCommand('dbtCommander.parse');
       await api.publishPathKeys();
     }
     assert.ok(!api.pathKeys().model[vscode.Uri.file(file('transform')).fsPath], 'transform still published after removal');
@@ -636,16 +657,16 @@ exports.run = async () => {
   // ----- v0.8: debug, docs, staging, new model, rename, exposures -----
 
   await step('dbt debug: connection check summary', async () => {
-    const r = await vscode.commands.executeCommand('dbtRunner.debug');
+    const r = await vscode.commands.executeCommand('dbtCommander.debug');
     assert.deepEqual(r, { ok: true, text: 'All checks passed!' });
   });
 
   await step('open in dbt docs: generates the static site and targets the model page', async () => {
     fs.rmSync(file('target', 'static_index.html'), { force: true });
-    const url = await vscode.commands.executeCommand('dbtRunner.openInDocs', uri('models', 'b.sql'));
+    const url = await vscode.commands.executeCommand('dbtCommander.openInDocs', uri('models', 'b.sql'));
     assert.ok(url && url.endsWith('static_index.html#!/model/model.demo.b'), String(url));
     assert.ok(fs.existsSync(file('target', 'static_index.html')));
-    assert.match(fs.readFileSync(file('target', 'dbt_runner_docs.html'), 'utf8'), /static_index\.html#!\/model\/model\.demo\.b/);
+    assert.match(fs.readFileSync(file('target', 'dbt_commander_docs.html'), 'utf8'), /static_index\.html#!\/model\/model\.demo\.b/);
   });
 
   await step('create staging model from a source (columns from the warehouse, YAML entry)', async () => {
@@ -654,8 +675,8 @@ exports.run = async () => {
     fs.writeFileSync(srcYml, 'version: 2\nsources:\n  - name: seeded\n    schema: main\n    tables:\n      - name: s\n');
     const created = [];
     try {
-      await vscode.commands.executeCommand('dbtRunner.seed');
-      await vscode.commands.executeCommand('dbtRunner.parse');
+      await vscode.commands.executeCommand('dbtCommander.seed');
+      await vscode.commands.executeCommand('dbtCommander.parse');
       const top = await api.sidebar.getChildren();
       const seeded = await child(await api.sidebar.getChildren(await child(top, 'Sources')), 'seeded');
       const table = await child(await api.sidebar.getChildren(seeded), 's');
@@ -679,7 +700,7 @@ exports.run = async () => {
       await vscode.commands.executeCommand('workbench.action.closeAllEditors');
       for (const c of created) fs.rmSync(c, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
       fs.rmSync(srcYml, { force: true });
-      await vscode.commands.executeCommand('dbtRunner.parse');
+      await vscode.commands.executeCommand('dbtCommander.parse');
     }
   });
 
@@ -702,19 +723,25 @@ exports.run = async () => {
     assert.equal(await rename(uri('models', 'b.sql'), 'c'), false, 'renamed onto an existing model');
     assert.equal(await rename(uri('models', 'b.sql'), 'b_renamed'), true);
     await vscode.workspace.saveAll(false);
+    let failure;
     try {
       assert.ok(fs.existsSync(file('models', 'b_renamed.sql')) && !fs.existsSync(file('models', 'b.sql')));
       assert.match(fs.readFileSync(file('models', 'c.sql'), 'utf8'), /ref\('b_renamed'\)/);
       assert.match(fs.readFileSync(file('snapshots', 'snap.sql'), 'utf8'), /ref\('b_renamed'\)/);
-      assert.match(fs.readFileSync(file('models', 'schema.yml'), 'utf8'), /- name: b_renamed\n/);
-      await vscode.commands.executeCommand('dbtRunner.parse');
+      // CI checks the fixtures out with CRLF line endings.
+      assert.match(fs.readFileSync(file('models', 'schema.yml'), 'utf8'), /- name: b_renamed\r?\n/);
+      await vscode.commands.executeCommand('dbtCommander.parse');
       const m = JSON.parse(fs.readFileSync(file('target', 'manifest.json'), 'utf8'));
       assert.deepEqual(m.parent_map['model.demo.c'], ['model.demo.b_renamed']);
-    } finally {
-      assert.equal(await rename(uri('models', 'b_renamed.sql'), 'b'), true, 'rename back');
-      await vscode.workspace.saveAll(false);
-      await vscode.commands.executeCommand('dbtRunner.parse');
+    } catch (e) {
+      failure = e; // report this, not a follow-on failure from the clean-up below
     }
+    // Rename back without re-parsing first: the (stale) manifest still lists `b`, which must not block it.
+    const back = await rename(uri('models', 'b_renamed.sql'), 'b');
+    await vscode.workspace.saveAll(false);
+    await vscode.commands.executeCommand('dbtCommander.parse');
+    if (failure) throw failure;
+    assert.equal(back, true, 'rename back');
     assert.match(fs.readFileSync(file('models', 'c.sql'), 'utf8'), /ref\('b'\)/);
   });
 
@@ -722,7 +749,7 @@ exports.run = async () => {
     const ex = file('models', 'zz_exposures.yml');
     fs.writeFileSync(ex, "version: 2\nexposures:\n  - name: dash\n    type: dashboard\n    owner:\n      name: me\n    depends_on:\n      - ref('c')\n");
     try {
-      await vscode.commands.executeCommand('dbtRunner.parse');
+      await vscode.commands.executeCommand('dbtCommander.parse');
       const top = await api.sidebar.getChildren();
       const exposures = await api.sidebar.getChildren(await child(top, 'Exposures'));
       assert.deepEqual(labels(exposures), ['dash']);
@@ -734,7 +761,7 @@ exports.run = async () => {
       assert.deepEqual(labels(await api.lineage.getChildren(down)), ['dash']);
     } finally {
       fs.rmSync(ex, { force: true });
-      await vscode.commands.executeCommand('dbtRunner.parse');
+      await vscode.commands.executeCommand('dbtCommander.parse');
     }
   });
 
@@ -748,7 +775,7 @@ exports.run = async () => {
     const top = await api.sidebar.getChildren();
     assert.equal(top.length, 1);
     assert.equal(top[0].kind, 'noManifest');
-    assert.equal(top[0].command.command, 'dbtRunner.parse');
+    assert.equal(top[0].command.command, 'dbtCommander.parse');
   });
 
   await step('right-click seed: one CSV in a subfolder', async () => {
@@ -757,13 +784,13 @@ exports.run = async () => {
   });
 
   await step('right-click seed: several CSVs selected', async () => {
-    await vscode.commands.executeCommand('dbtRunner.seedFiles', uri('seeds', 's.csv'), [uri('seeds', 's.csv'), uri('seeds', 'ref', 'countries.csv')]);
+    await vscode.commands.executeCommand('dbtCommander.seedFiles', uri('seeds', 's.csv'), [uri('seeds', 's.csv'), uri('seeds', 'ref', 'countries.csv')]);
     assert.deepEqual(results(), ['seed.demo.countries', 'seed.demo.s']);
   });
 
   await step('seed menu shows for seed CSVs only', async () => {
     const pkg = require(path.resolve(__dirname, '..', '..', 'package.json'));
-    const when = pkg.contributes.menus['explorer/context'].find(m => m.command === 'dbtRunner.seedFiles').when;
+    const when = pkg.contributes.menus['explorer/context'].find(m => m.command === 'dbtCommander.seedFiles').when;
     const [ext, inSeeds, excluded] = [...when.matchAll(/=~ \/(.+?)\/i/g)].map(m => new RegExp(m[1], 'i'));
     const shows = p => ext.test(path.extname(p)) && inSeeds.test(p) && !excluded.test(p);
     assert.ok(shows(file('seeds', 's.csv')) && shows(file('seeds', 'ref', 'countries.csv')));
@@ -771,19 +798,19 @@ exports.run = async () => {
   });
 
   await step('right-click any folder: build everything inside (subfolders included)', async () => {
-    await vscode.commands.executeCommand('dbtRunner.build', uri('seeds'), [uri('seeds')]);
+    await vscode.commands.executeCommand('dbtCommander.build', uri('seeds'), [uri('seeds')]);
     assert.deepEqual(results(), ['seed.demo.countries', 'seed.demo.s']);
   });
 
   await step('right-click any folder: seed a subfolder', async () => {
-    await vscode.commands.executeCommand('dbtRunner.seedFiles', uri('seeds', 'ref'), [uri('seeds', 'ref')]);
+    await vscode.commands.executeCommand('dbtCommander.seedFiles', uri('seeds', 'ref'), [uri('seeds', 'ref')]);
     assert.deepEqual(results(), ['seed.demo.countries']);
   });
 
   await step('right-click the project folder: build / seed the whole project', async () => {
-    await vscode.commands.executeCommand('dbtRunner.seedFiles', vscode.Uri.file(root), [vscode.Uri.file(root)]);
+    await vscode.commands.executeCommand('dbtCommander.seedFiles', vscode.Uri.file(root), [vscode.Uri.file(root)]);
     assert.deepEqual(results(), ['seed.demo.countries', 'seed.demo.s']);
-    await vscode.commands.executeCommand('dbtRunner.build', vscode.Uri.file(root), [vscode.Uri.file(root)]);
+    await vscode.commands.executeCommand('dbtCommander.build', vscode.Uri.file(root), [vscode.Uri.file(root)]);
     const r = results();
     for (const id of ['model.demo.b', 'model.demo.c', 'model.demo.stg_a', 'seed.demo.s', 'seed.demo.countries']) {
       assert.ok(r.includes(id), `${id} missing from ${r.join(',')}`);
@@ -793,7 +820,7 @@ exports.run = async () => {
 
   await step('folder menu shows for project folders, not for target / dbt_packages / .git', async () => {
     const pkg = require(path.resolve(__dirname, '..', '..', 'package.json'));
-    const when = pkg.contributes.menus['explorer/context'].find(m => m.submenu === 'dbtRunner.submenu').when;
+    const when = pkg.contributes.menus['explorer/context'].find(m => m.submenu === 'dbtCommander.submenu').when;
     const folderPart = when.slice(when.indexOf('explorerResourceIsFolder'));
     const [excluded] = [...folderPart.matchAll(/=~ \/(.+?)\/i/g)].map(m => new RegExp(m[1], 'i'));
     const shows = p => !excluded.test(p);
@@ -806,13 +833,13 @@ exports.run = async () => {
   });
 
   await step('seed / deps / docs generate (static, not opened) / snapshot', async () => {
-    await vscode.commands.executeCommand('dbtRunner.seed');
+    await vscode.commands.executeCommand('dbtCommander.seed');
     assert.deepEqual(results(), ['seed.demo.countries', 'seed.demo.s']);
-    await vscode.commands.executeCommand('dbtRunner.deps');
+    await vscode.commands.executeCommand('dbtCommander.deps');
     fs.rmSync(file('target', 'static_index.html'), { force: true });
-    await vscode.commands.executeCommand('dbtRunner.docsGenerate'); // openDocsAfterGenerate=false in workspace settings
+    await vscode.commands.executeCommand('dbtCommander.docsGenerate'); // openDocsAfterGenerate=false in workspace settings
     assert.ok(fs.existsSync(file('target', 'static_index.html')), 'static_index.html not generated');
-    await vscode.commands.executeCommand('dbtRunner.snapshot');
+    await vscode.commands.executeCommand('dbtCommander.snapshot');
   });
 
   fs.writeFileSync(process.env.ITEST_OUT, out.join('\n'));

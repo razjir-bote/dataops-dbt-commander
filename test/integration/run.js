@@ -50,7 +50,7 @@ function freshProject() {
   fs.mkdirSync(path.join(work, '.vscode'), { recursive: true });
   fs.writeFileSync(
     path.join(work, '.vscode', 'settings.json'),
-    JSON.stringify({ 'dbtRunner.venvPath': venv, 'dbtRunner.openDocsAfterGenerate': false }, null, 2)
+    JSON.stringify({ 'dbtCommander.venvPath': venv, 'dbtCommander.openDocsAfterGenerate': false }, null, 2)
   );
 }
 

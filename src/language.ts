@@ -230,7 +230,7 @@ class DbtCodeLensProvider implements vscode.CodeLensProvider {
   async provideCodeLenses(doc: vscode.TextDocument): Promise<vscode.CodeLens[]> {
     const p = doc.uri.fsPath;
     if (
-      !vscode.workspace.getConfiguration('dbtRunner').get<boolean>('codeLens', true) ||
+      !vscode.workspace.getConfiguration('dbtCommander').get<boolean>('codeLens', true) ||
       doc.uri.scheme !== 'file' ||
       !/\.sql$/i.test(p) ||
       !inProjectPaths(this.deps, p, ['model'])
@@ -239,11 +239,11 @@ class DbtCodeLensProvider implements vscode.CodeLensProvider {
     }
     const range = new vscode.Range(0, 0, 0, 0);
     const lenses = [
-      ['$(play) Run', 'dbtRunner.run'],
-      ['Build', 'dbtRunner.build'],
-      ['Test', 'dbtRunner.test'],
-      ['Compile', 'dbtRunner.compile'],
-      ['Preview', 'dbtRunner.preview']
+      ['$(play) Run', 'dbtCommander.run'],
+      ['Build', 'dbtCommander.build'],
+      ['Test', 'dbtCommander.test'],
+      ['Compile', 'dbtCommander.compile'],
+      ['Preview', 'dbtCommander.preview']
     ].map(([title, command]) => new vscode.CodeLens(range, { title, command, arguments: [doc.uri], tooltip: `dbt ${title.replace('$(play) ', '').toLowerCase()} this model` }));
     // The model's last result, e.g. "✓ 3m ago · 1.2s", as the first (non-clickable) lens.
     const root = this.deps.projectRootOf(p);
@@ -319,6 +319,6 @@ export function registerLanguageFeatures(ctx: vscode.ExtensionContext, deps: Lan
     vscode.languages.registerCodeLensProvider(selector, lenses),
     vscode.languages.registerHoverProvider(selector, new DbtHoverProvider(deps)),
     vscode.languages.registerReferenceProvider(selector, new DbtReferenceProvider(deps)),
-    vscode.workspace.onDidChangeConfiguration(e => e.affectsConfiguration('dbtRunner.codeLens') && lenses.refresh())
+    vscode.workspace.onDidChangeConfiguration(e => e.affectsConfiguration('dbtCommander.codeLens') && lenses.refresh())
   );
 }
