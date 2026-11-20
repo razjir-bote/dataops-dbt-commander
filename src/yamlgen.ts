@@ -36,7 +36,9 @@ function columnLines(columns: Column[], dash: number): string[] {
 
 function modelLines(model: string, columns: Column[], dash: number, indentSeq: boolean): string[] {
   const key = dash + 2;
-  return [`${sp(dash)}- name: ${scalar(model)}`, `${sp(key)}description: ""`, `${sp(key)}columns:`, ...columnLines(columns, indentSeq ? key + 2 : key)];
+  const head = [`${sp(dash)}- name: ${scalar(model)}`, `${sp(key)}description: ""`];
+  // No columns yet (a brand-new model): leave `columns:` out rather than writing an empty (null) key.
+  return columns.length ? [...head, `${sp(key)}columns:`, ...columnLines(columns, indentSeq ? key + 2 : key)] : head;
 }
 
 /** A fresh `version: 2` YAML file describing one model. */

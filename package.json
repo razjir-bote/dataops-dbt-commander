@@ -2,7 +2,7 @@
   "name": "dbt-runner",
   "displayName": "dbt Runner",
   "description": "Run, build, test, compile and preview dbt models from the VS Code Explorer and editor with dbt-core 1.x from a configured venv.",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "publisher": "local",
   "license": "MIT",
   "engines": {
@@ -196,6 +196,33 @@
         "title": "Rerun last dbt command",
         "category": "dbt Runner",
         "icon": "$(debug-restart)"
+      },
+      {
+        "command": "dbtRunner.renameModel",
+        "title": "dbt Rename model…",
+        "category": "dbt Runner"
+      },
+      {
+        "command": "dbtRunner.createStaging",
+        "title": "dbt Create staging model",
+        "category": "dbt Runner"
+      },
+      {
+        "command": "dbtRunner.newModel",
+        "title": "dbt New model…",
+        "category": "dbt Runner"
+      },
+      {
+        "command": "dbtRunner.openInDocs",
+        "title": "Open in dbt docs",
+        "category": "dbt Runner",
+        "icon": "$(book)"
+      },
+      {
+        "command": "dbtRunner.debug",
+        "title": "Check connection (dbt debug)",
+        "category": "dbt Runner",
+        "icon": "$(plug)"
       }
     ],
     "submenus": [
@@ -293,6 +320,21 @@
           "command": "dbtRunner.showLineage",
           "group": "inspect@4",
           "when": "!explorerResourceIsFolder"
+        },
+        {
+          "command": "dbtRunner.renameModel",
+          "group": "refactor@1",
+          "when": "!explorerResourceIsFolder"
+        },
+        {
+          "command": "dbtRunner.openInDocs",
+          "group": "inspect@5",
+          "when": "!explorerResourceIsFolder"
+        },
+        {
+          "command": "dbtRunner.newModel",
+          "group": "refactor@2",
+          "when": "explorerResourceIsFolder && (resourcePath =~ /[\\\\/]models([\\\\/]|$)/i || resourcePath in dbtRunner.modelPaths)"
         }
       ],
       "commandPalette": [
@@ -386,6 +428,22 @@
         },
         {
           "command": "dbtRunner.tree.buildUpDownstream",
+          "when": "false"
+        },
+        {
+          "command": "dbtRunner.renameModel",
+          "when": "editorIsOpen && resourceExtname =~ /^\\.sql$/i && (resourcePath =~ /[\\\\/]models([\\\\/]|$)/i || resourcePath in dbtRunner.modelPaths) && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
+        },
+        {
+          "command": "dbtRunner.openInDocs",
+          "when": "editorIsOpen && resourceExtname =~ /^\\.sql$/i && (resourcePath =~ /[\\\\/]models([\\\\/]|$)/i || resourcePath in dbtRunner.modelPaths) && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
+        },
+        {
+          "command": "dbtRunner.createStaging",
+          "when": "editorIsOpen && resourceExtname =~ /^\\.sql$/i"
+        },
+        {
+          "command": "dbtRunner.newModel",
           "when": "false"
         }
       ],
@@ -526,6 +584,36 @@
           "command": "dbtRunner.tree.buildUpDownstream",
           "when": "view == dbtRunner.project && viewItem =~ /^(model|modelFolder|section-models|seed|seedFolder|section-seeds)$/",
           "group": "1_graph@3"
+        },
+        {
+          "command": "dbtRunner.renameModel",
+          "when": "view == dbtRunner.project && viewItem == model",
+          "group": "refactor@1"
+        },
+        {
+          "command": "dbtRunner.newModel",
+          "when": "view == dbtRunner.project && viewItem =~ /^(modelFolder|section-models)$/",
+          "group": "refactor@2"
+        },
+        {
+          "command": "dbtRunner.createStaging",
+          "when": "view == dbtRunner.project && viewItem == sourceTable",
+          "group": "refactor@3"
+        },
+        {
+          "command": "dbtRunner.openInDocs",
+          "when": "view == dbtRunner.project && viewItem =~ /^(model|seed|snapshot|sourceTable|exposure|semanticModel)$/",
+          "group": "model@4"
+        },
+        {
+          "command": "dbtRunner.openInDocs",
+          "when": "view == dbtRunner.lineage && viewItem =~ /^lineage-/",
+          "group": "docs@1"
+        },
+        {
+          "command": "dbtRunner.createStaging",
+          "when": "view == dbtRunner.lineage && viewItem =~ /^lineage-source/",
+          "group": "docs@2"
         }
       ]
     },
@@ -568,6 +656,11 @@
           "default": 30,
           "minimum": 0,
           "description": "Show a notification with the results when a dbt command takes at least this many seconds (0 = never)."
+        },
+        "dbtRunner.newModelTemplate": {
+          "type": "string",
+          "default": "",
+          "description": "Optional template file for \"dbt New model…\" (relative to the dbt project or absolute). {{name}} is replaced with the model name."
         }
       }
     },

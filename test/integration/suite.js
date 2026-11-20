@@ -24,6 +24,10 @@ exports.run = async () => {
   const same = (a, b) => path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
 
   const api = await vscode.extensions.getExtension('local.dbt-runner').activate();
+  // v0.8 commands with their inputs given directly (no input boxes / refactor preview in tests).
+  const createStaging = (item, rel) => api.projectEdits.createStaging(item, rel);
+  const newModelIn = (folderUri, name) => api.projectEdits.newModel(folderUri, name);
+  const rename = (u, name) => api.projectEdits.rename(u, name, false);
   const cfg = () => vscode.workspace.getConfiguration('dbtRunner');
 
   await step('venv setting read from workspace', async () => assert.ok(fs.existsSync(cfg().get('venvPath'))));
@@ -627,6 +631,111 @@ exports.run = async () => {
       await api.publishPathKeys();
     }
     assert.ok(!api.pathKeys().model[vscode.Uri.file(file('transform')).fsPath], 'transform still published after removal');
+  });
+
+  // ----- v0.8: debug, docs, staging, new model, rename, exposures -----
+
+  await step('dbt debug: connection check summary', async () => {
+    const r = await vscode.commands.executeCommand('dbtRunner.debug');
+    assert.deepEqual(r, { ok: true, text: 'All checks passed!' });
+  });
+
+  await step('open in dbt docs: generates the static site and targets the model page', async () => {
+    fs.rmSync(file('target', 'static_index.html'), { force: true });
+    const url = await vscode.commands.executeCommand('dbtRunner.openInDocs', uri('models', 'b.sql'));
+    assert.ok(url && url.endsWith('static_index.html#!/model/model.demo.b'), String(url));
+    assert.ok(fs.existsSync(file('target', 'static_index.html')));
+    assert.match(fs.readFileSync(file('target', 'dbt_runner_docs.html'), 'utf8'), /static_index\.html#!\/model\/model\.demo\.b/);
+  });
+
+  await step('create staging model from a source (columns from the warehouse, YAML entry)', async () => {
+    // A source over the seeded table main.s, so the warehouse has columns to read.
+    const srcYml = file('models', 'zz_src.yml');
+    fs.writeFileSync(srcYml, 'version: 2\nsources:\n  - name: seeded\n    schema: main\n    tables:\n      - name: s\n');
+    const created = [];
+    try {
+      await vscode.commands.executeCommand('dbtRunner.seed');
+      await vscode.commands.executeCommand('dbtRunner.parse');
+      const top = await api.sidebar.getChildren();
+      const seeded = await child(await api.sidebar.getChildren(await child(top, 'Sources')), 'seeded');
+      const table = await child(await api.sidebar.getChildren(seeded), 's');
+      const f = await createStaging(table, 'models/staging/seeded/stg_seeded__s.sql');
+      created.push(f, file('models', 'staging', 'seeded'));
+      const sql = fs.readFileSync(f, 'utf8');
+      assert.match(sql, /source\('seeded', 's'\)/);
+      assert.match(sql, /select\r?\n        id,\r?\n        name\r?\n/); // VS Code writes CRLF on Windows
+      await vscode.workspace.saveAll(false);
+      const yml = fs.readFileSync(file('models', 'staging', 'seeded', 'stg_seeded__s.yml'), 'utf8');
+      assert.match(yml, /- name: stg_seeded__s[\s\S]*- name: id[\s\S]*- name: name/);
+      // A source the warehouse doesn't have: select * with a TODO.
+      const raw = await child(await api.sidebar.getChildren(await child(top, 'Sources')), 'raw');
+      const orders = await child(await api.sidebar.getChildren(raw), 'orders');
+      const f2 = await createStaging(orders, 'models/staging/raw/stg_raw__orders.sql');
+      created.push(f2, file('models', 'staging', 'raw'));
+      assert.match(fs.readFileSync(f2, 'utf8'), /TODO: list the columns[\s\S]*select \* from source/);
+    } finally {
+      // Save, then close the new files so Windows lets the folders be deleted.
+      await vscode.workspace.saveAll(false);
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+      for (const c of created) fs.rmSync(c, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+      fs.rmSync(srcYml, { force: true });
+      await vscode.commands.executeCommand('dbtRunner.parse');
+    }
+  });
+
+  await step('new model from the template, with a YAML entry', async () => {
+    const yml = file('models', 'staging', 'stg_a.yml');
+    const before = fs.existsSync(yml) ? fs.readFileSync(yml, 'utf8') : undefined;
+    const f = await newModelIn(uri('models', 'staging'), 'zz_new');
+    try {
+      assert.ok(same(f, file('models', 'staging', 'zz_new.sql')));
+      assert.match(fs.readFileSync(f, 'utf8'), /ref\('replace_me'\)/);
+      await vscode.workspace.saveAll(false);
+      assert.match(fs.readFileSync(yml, 'utf8'), /- name: zz_new\r?\n\s+description: ""/);
+    } finally {
+      fs.rmSync(f, { force: true });
+      if (before !== undefined) fs.writeFileSync(yml, before);
+    }
+  });
+
+  await step('rename model: file, every ref() and the YAML entry; refuses taken names', async () => {
+    assert.equal(await rename(uri('models', 'b.sql'), 'c'), false, 'renamed onto an existing model');
+    assert.equal(await rename(uri('models', 'b.sql'), 'b_renamed'), true);
+    await vscode.workspace.saveAll(false);
+    try {
+      assert.ok(fs.existsSync(file('models', 'b_renamed.sql')) && !fs.existsSync(file('models', 'b.sql')));
+      assert.match(fs.readFileSync(file('models', 'c.sql'), 'utf8'), /ref\('b_renamed'\)/);
+      assert.match(fs.readFileSync(file('snapshots', 'snap.sql'), 'utf8'), /ref\('b_renamed'\)/);
+      assert.match(fs.readFileSync(file('models', 'schema.yml'), 'utf8'), /- name: b_renamed\n/);
+      await vscode.commands.executeCommand('dbtRunner.parse');
+      const m = JSON.parse(fs.readFileSync(file('target', 'manifest.json'), 'utf8'));
+      assert.deepEqual(m.parent_map['model.demo.c'], ['model.demo.b_renamed']);
+    } finally {
+      assert.equal(await rename(uri('models', 'b_renamed.sql'), 'b'), true, 'rename back');
+      await vscode.workspace.saveAll(false);
+      await vscode.commands.executeCommand('dbtRunner.parse');
+    }
+    assert.match(fs.readFileSync(file('models', 'c.sql'), 'utf8'), /ref\('b'\)/);
+  });
+
+  await step('exposures: sidebar section and downstream lineage', async () => {
+    const ex = file('models', 'zz_exposures.yml');
+    fs.writeFileSync(ex, "version: 2\nexposures:\n  - name: dash\n    type: dashboard\n    owner:\n      name: me\n    depends_on:\n      - ref('c')\n");
+    try {
+      await vscode.commands.executeCommand('dbtRunner.parse');
+      const top = await api.sidebar.getChildren();
+      const exposures = await api.sidebar.getChildren(await child(top, 'Exposures'));
+      assert.deepEqual(labels(exposures), ['dash']);
+      assert.equal(exposures[0].command.arguments[1].selection.start.line, 2);
+      await api.lineage.unpin();
+      await api.lineage.follow(uri('models', 'c.sql'));
+      const [focus] = await api.lineage.getChildren();
+      const [, down] = await api.lineage.getChildren(focus);
+      assert.deepEqual(labels(await api.lineage.getChildren(down)), ['dash']);
+    } finally {
+      fs.rmSync(ex, { force: true });
+      await vscode.commands.executeCommand('dbtRunner.parse');
+    }
   });
 
   await step('go to definition without a manifest falls back to the file name', async () => {

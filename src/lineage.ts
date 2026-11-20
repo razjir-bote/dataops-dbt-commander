@@ -24,6 +24,7 @@ const ICONS: Record<string, string> = {
   snapshot: 'history',
   source: 'database',
   exposure: 'graph',
+  semantic_model: 'symbol-structure',
   other: 'circle-small'
 };
 

@@ -33,6 +33,7 @@ import { DbtTests } from './testing';
 import { DbtLineage } from './lineage';
 import { RunStatusStore } from './runstatus';
 import { DbtLastRun } from './lastrun';
+import { EditDeps, checkConnection, createStagingModel, newModel, openInDocs, renameModel } from './projectedits';
 
 let statusItem: vscode.StatusBarItem;
 let targetItem: vscode.StatusBarItem;
@@ -338,13 +339,16 @@ async function runDbt(action: DbtAction, graph: GraphScope, uri?: vscode.Uri, ur
 // ---------- generate YAML ----------
 
 /** Ask the warehouse (through dbt) for a built model's columns. */
-async function fetchColumns(exe: string, root: string, model: string): Promise<{ columns: Column[]; error?: string }> {
-  const jinja =
-    `{%- for c in adapter.get_columns_in_relation(ref('${model.replace(/'/g, "\\'")}')) -%}` +
-    'DBTCOL|{{ c.name }}|{{ c.data_type }}\n{% endfor -%}';
+function fetchColumns(exe: string, root: string, model: string): Promise<{ columns: Column[]; error?: string }> {
+  return fetchRelationColumns(exe, root, `ref('${model.replace(/'/g, "\\'")}')`, model);
+}
+
+/** Columns of any relation dbt can name (`ref('x')`, `source('raw', 'orders')`), read from the warehouse. */
+async function fetchRelationColumns(exe: string, root: string, relation: string, label: string): Promise<{ columns: Column[]; error?: string }> {
+  const jinja = `{%- for c in adapter.get_columns_in_relation(${relation}) -%}` + 'DBTCOL|{{ c.name }}|{{ c.data_type }}\n{% endfor -%}';
   const args = ['compile', '--inline', jinja, '--quiet', ...flagArgs(cfg().get<string>('target', ''), cfg().get<string>('extraArgs', ''))];
   return vscode.window.withProgress(
-    { location: vscode.ProgressLocation.Notification, title: `dbt: reading columns of ${model}`, cancellable: true },
+    { location: vscode.ProgressLocation.Notification, title: `dbt: reading columns of ${label}`, cancellable: true },
     (_p, token) =>
       new Promise(resolve => {
         const child = execFile(
@@ -645,6 +649,7 @@ async function showMenu(): Promise<void> {
   void refreshStatus(); // dbt may have been installed into the venv since the last check
   const items: (vscode.QuickPickItem & { command: string })[] = [
     { label: '$(debug-restart) Rerun last command', command: 'dbtRunner.rerunLast' },
+    { label: '$(plug) Check connection (dbt debug)', command: 'dbtRunner.debug' },
     { label: '$(refresh) dbt retry', description: 'rerun only what failed last time', command: 'dbtRunner.retry' },
     { label: '$(package) dbt deps', command: 'dbtRunner.deps' },
     { label: '$(table) dbt seed', command: 'dbtRunner.seed' },
@@ -796,6 +801,26 @@ export interface DbtRunnerApi {
   lastRun: DbtLastRun;
   pathKeys: () => typeof pathKeys;
   publishPathKeys: () => Promise<void>;
+  /** The v0.8 edit commands with their inputs given directly (no input box / refactor preview), for tests. */
+  projectEdits: {
+    rename(target: unknown, name: string, preview?: boolean): Promise<boolean>;
+    createStaging(target: unknown, relPath: string): Promise<string | undefined>;
+    newModel(folder: unknown, name: string): Promise<string | undefined>;
+  };
+}
+
+/** Run dbt and capture its output (with a cancellable progress notification). */
+function runCaptured(exe: string, args: string[], cwd: string, title: string): Promise<string> {
+  return Promise.resolve(
+    vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title, cancellable: true }, (_p, token) =>
+      new Promise<string>(resolve => {
+        const child = execFile(exe, args, { cwd, maxBuffer: 16 * 1024 * 1024, windowsHide: true, env: { ...process.env, PYTHONIOENCODING: 'utf-8' } }, (err, stdout, stderr) =>
+          resolve(`${stdout}\n${stderr}${err && !stdout && !stderr ? err.message : ''}`)
+        );
+        token.onCancellationRequested(() => killTree(child));
+      })
+    )
+  );
 }
 
 export function activate(ctx: vscode.ExtensionContext): DbtRunnerApi {
@@ -968,7 +993,41 @@ export function activate(ctx: vscode.ExtensionContext): DbtRunnerApi {
   );
   void lineage.follow(vscode.window.activeTextEditor?.document.uri);
 
-  return { sidebar, tests, lineage, runStatus, lastRun: lastRunView, pathKeys: () => pathKeys, publishPathKeys };
+  // v0.8: rename model, staging model from a source, new model, open in docs, dbt debug.
+  const edits: EditDeps = {
+    language: languageDeps,
+    requireExe,
+    flags: () => flagArgs(cfg().get<string>('target', ''), cfg().get<string>('extraArgs', '')),
+    settings: () => ({ target: cfg().get<string>('target', ''), extraArgs: cfg().get<string>('extraArgs', '') }),
+    pickProjectRoot: () => pickProjectRoot(true),
+    fetchRelationColumns,
+    writeModelYaml,
+    projectCommand,
+    runCaptured,
+    asUri
+  };
+  ctx.subscriptions.push(
+    vscode.commands.registerCommand('dbtRunner.renameModel', (target?: unknown) => renameModel(edits, target)),
+    vscode.commands.registerCommand('dbtRunner.createStaging', (target?: unknown) => createStagingModel(edits, target)),
+    vscode.commands.registerCommand('dbtRunner.newModel', (target?: unknown) => newModel(edits, target)),
+    vscode.commands.registerCommand('dbtRunner.openInDocs', (target?: unknown) => openInDocs(edits, target)),
+    vscode.commands.registerCommand('dbtRunner.debug', () => checkConnection(edits))
+  );
+
+  return {
+    sidebar,
+    tests,
+    lineage,
+    runStatus,
+    lastRun: lastRunView,
+    pathKeys: () => pathKeys,
+    publishPathKeys,
+    projectEdits: {
+      rename: (target, name, preview) => renameModel(edits, target, name, preview),
+      createStaging: (target, relPath) => createStagingModel(edits, target, relPath),
+      newModel: (folder, name) => newModel(edits, folder, name)
+    }
+  };
 }
 
 export function deactivate(): void {}

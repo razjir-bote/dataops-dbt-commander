@@ -67,7 +67,7 @@ export interface NodeEntry {
   singular?: boolean;
 }
 
-export type NodeType = 'model' | 'seed' | 'snapshot' | 'source' | 'exposure' | 'test' | 'other';
+export type NodeType = 'model' | 'seed' | 'snapshot' | 'source' | 'exposure' | 'semantic_model' | 'test' | 'other';
 
 /** Any manifest node, source or exposure, for lineage. */
 export interface NodeInfo {
@@ -100,6 +100,9 @@ export interface ManifestIndex {
   seeds: NodeEntry[];
   snapshots: NodeEntry[];
   tests: NodeEntry[];
+  /** The project's exposures and semantic models (YAML-defined). */
+  exposures: NodeEntry[];
+  semanticModels: NodeEntry[];
   /** Root-project model name → the YAML file that already describes it (`patch_path`). */
   patches: Map<string, string>;
 }
@@ -276,20 +279,30 @@ export function parseManifest(
   for (const s of sources) {
     nodes.set(s.uniqueId, { id: s.uniqueId, name: `${s.source}.${s.table}`, type: 'source', package: s.package, file: s.file, source: s.source, table: s.table });
   }
-  for (const [id, e] of Object.entries<any>(m.exposures ?? {})) {
-    if (e?.name) {
-      nodes.set(id, {
-        id,
-        name: e.name,
-        type: 'exposure',
-        package: e.package_name,
-        ...(e.original_file_path ? { file: fileFor(root, rootPackage, e.package_name, e.original_file_path, packagesDir) } : {})
-      });
+  // Exposures and semantic models: YAML-defined, shown in the sidebar and lineage.
+  const exposures: NodeEntry[] = [];
+  const semanticModels: NodeEntry[] = [];
+  for (const [group, type, list] of [
+    [m.exposures, 'exposure', exposures],
+    [m.semantic_models, 'semantic_model', semanticModels]
+  ] as [unknown, NodeType, NodeEntry[]][]) {
+    for (const [id, e] of Object.entries<any>(group && typeof group === 'object' ? group : {})) {
+      if (!e?.name) {
+        continue;
+      }
+      const file = e.original_file_path ? fileFor(root, rootPackage, e.package_name, e.original_file_path, packagesDir) : undefined;
+      nodes.set(id, { id, name: e.name, type, package: e.package_name, ...(file ? { file } : {}) });
+      if (file && e.package_name === rootPackage) {
+        list.push({ uniqueId: id, name: e.name, package: e.package_name, file });
+      }
     }
   }
   const asMap = (x: unknown) =>
     new Map<string, string[]>(Object.entries<any>(x && typeof x === 'object' ? x : {}).filter(([, v]) => Array.isArray(v)));
-  return { models, sources, macros, seeds, snapshots, tests, patches, nodes, parents: asMap(m.parent_map), children: asMap(m.child_map) };
+  return {
+    models, sources, macros, seeds, snapshots, tests, exposures, semanticModels, patches, nodes,
+    parents: asMap(m.parent_map), children: asMap(m.child_map)
+  };
 }
 
 /**

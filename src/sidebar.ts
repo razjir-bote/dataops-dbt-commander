@@ -17,9 +17,11 @@ export type ItemKind =
   | 'snapshot'
   | 'testGroup'
   | 'test'
+  | 'exposure'
+  | 'semanticModel'
   | 'noManifest';
 
-type Section = 'models' | 'sources' | 'seeds' | 'snapshots' | 'tests';
+type Section = 'models' | 'sources' | 'seeds' | 'snapshots' | 'tests' | 'exposures' | 'semanticModels';
 
 export class DbtItem extends vscode.TreeItem {
   constructor(
@@ -37,6 +39,16 @@ export class DbtItem extends vscode.TreeItem {
 const None = vscode.TreeItemCollapsibleState.None;
 const Collapsed = vscode.TreeItemCollapsibleState.Collapsed;
 const Expanded = vscode.TreeItemCollapsibleState.Expanded;
+
+/** 0-based line of `- name: <name>` in a YAML file (0 if not found). */
+function yamlEntryLine(file: string, name: string): number {
+  try {
+    const re = new RegExp(`^\\s*-\\s*name:\\s*['"]?${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"]?\\s*$`);
+    return Math.max(0, fs.readFileSync(file, 'utf8').split(/\r?\n/).findIndex(l => re.test(l)));
+  } catch {
+    return 0;
+  }
+}
 
 function openCommand(file: string, line = 0): vscode.Command {
   return {
@@ -135,7 +147,9 @@ export class DbtSidebar implements vscode.TreeDataProvider<DbtItem>, vscode.Disp
       ['sources', 'Sources', new Set(index.sources.filter(s => s.package === pkg).map(s => s.source)).size, 'database'],
       ['seeds', 'Seeds', index.seeds.length, 'table'],
       ['snapshots', 'Snapshots', index.snapshots.length, 'history'],
-      ['tests', 'Tests', index.tests.length, 'beaker']
+      ['tests', 'Tests', index.tests.length, 'beaker'],
+      ['exposures', 'Exposures', index.exposures.length, 'graph'],
+      ['semanticModels', 'Semantic models', index.semanticModels.length, 'symbol-structure']
     ];
     return counts
       .filter(([, , n]) => n > 0)
@@ -177,6 +191,10 @@ export class DbtSidebar implements vscode.TreeDataProvider<DbtItem>, vscode.Disp
         return this.folderLevel(root, index, 'seed', '');
       case 'snapshots':
         return this.leaves(root, index.snapshots, 'snapshot', 'history');
+      case 'exposures':
+        return this.leaves(root, index.exposures, 'exposure', 'graph');
+      case 'semanticModels':
+        return this.leaves(root, index.semanticModels, 'semanticModel', 'symbol-structure');
       case 'tests': {
         const models = [...new Set(index.tests.map(t => t.attachedTo ?? ''))].sort();
         return models.map(model => {
@@ -268,7 +286,8 @@ export class DbtSidebar implements vscode.TreeDataProvider<DbtItem>, vscode.Disp
         it.description = this.badge(root, n.uniqueId);
         it.resourceUri = vscode.Uri.file(n.file);
         it.iconPath = new vscode.ThemeIcon(icon);
-        it.command = openCommand(n.file);
+        // YAML-defined nodes open at their `- name:` entry.
+        it.command = openCommand(n.file, /\.ya?ml$/i.test(n.file) ? yamlEntryLine(n.file, n.name) : 0);
         it.tooltip = path.relative(root, n.file);
         return it;
       });

@@ -61,6 +61,17 @@ Supports dbt-core 1.x (tested with 1.12); not dbt 2 / Fusion.
 - **Find references** — Shift+F12 on `ref('orders')` or in `orders.sql` lists everything that refs it.
 - **Custom folders** — `model-paths`, `seed-paths`, `snapshot-paths` and `packages-install-path` from
   `dbt_project.yml` are respected by menus, links and navigation.
+- **dbt Rename model…** (right-click a model) — renames the file, every `ref()` to it (models, snapshots,
+  analyses, tests, macros, YAML) and its `models:` / `unit_tests:` YAML entries, shown first in VS Code's refactor
+  preview. Versioned models and per-model settings in `dbt_project.yml` are not renamed.
+- **dbt Create staging model** (right-click a source table, or on a `source()` call) — creates
+  `stg_<source>__<table>.sql` selecting the table's columns (read from the warehouse) and its YAML entry.
+- **dbt New model…** (right-click a model folder) — creates a model from a template (`dbtRunner.newModelTemplate`,
+  `{{name}}` placeholder) with a YAML entry.
+- **Open in dbt docs** — jumps to a model's / source's / seed's / exposure's page in the static docs site
+  (generated on first use).
+- **Exposures and semantic models** in the sidebar and in Lineage.
+- **Check connection (dbt debug)** in the status bar menu.
 
 Go to definition and autocomplete read `target/manifest.json`, which dbt rewrites on every run, build, compile or
 parse — so they reflect your last dbt command. Without a manifest, `ref()` still jumps to a model file of that name.
