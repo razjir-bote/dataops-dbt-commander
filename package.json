@@ -2,7 +2,7 @@
   "name": "dbt-runner",
   "displayName": "dbt Runner",
   "description": "Run, build, test, compile and preview dbt models from the VS Code Explorer and editor with dbt-core 1.x from a configured venv.",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "publisher": "local",
   "license": "MIT",
   "engines": {
@@ -380,7 +380,7 @@
         },
         {
           "command": "dbtRunner.tree.build",
-          "when": "view == dbtRunner.project && viewItem =~ /^(model|modelFolder|section-models|seedFolder|section-seeds|project)$/",
+          "when": "view == dbtRunner.project && viewItem =~ /^(model|modelFolder|section-models|seed|seedFolder|section-seeds|project)$/",
           "group": "inline@2"
         },
         {
@@ -432,6 +432,36 @@
           "command": "dbtRunner.tree.seed",
           "when": "view == dbtRunner.lineage && viewItem == lineage-seed",
           "group": "inline@1"
+        },
+        {
+          "command": "dbtRunner.tree.run",
+          "when": "view == dbtRunner.project && viewItem =~ /^(model|modelFolder|section-models)$/",
+          "group": "0_dbt@1"
+        },
+        {
+          "command": "dbtRunner.tree.build",
+          "when": "view == dbtRunner.project && viewItem =~ /^(model|modelFolder|section-models|seed|seedFolder|section-seeds|project)$/",
+          "group": "0_dbt@2"
+        },
+        {
+          "command": "dbtRunner.tree.test",
+          "when": "view == dbtRunner.project && viewItem =~ /^(model|modelFolder|section-models|seed|seedFolder|section-seeds)$/",
+          "group": "0_dbt@3"
+        },
+        {
+          "command": "dbtRunner.tree.seed",
+          "when": "view == dbtRunner.project && viewItem =~ /^(seed|seedFolder|section-seeds|project)$/",
+          "group": "0_dbt@4"
+        },
+        {
+          "command": "dbtRunner.tree.snapshot",
+          "when": "view == dbtRunner.project && viewItem == snapshot",
+          "group": "0_dbt@5"
+        },
+        {
+          "command": "dbtRunner.tree.runTest",
+          "when": "view == dbtRunner.project && viewItem == test",
+          "group": "0_dbt@6"
         }
       ]
     },

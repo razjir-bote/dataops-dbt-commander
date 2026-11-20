@@ -38,7 +38,8 @@ Supports dbt-core 1.x (tested with 1.12); not dbt 2 / Fusion.
   creates `<model>.yml`. Existing lines are left untouched and the change is left unsaved for you to review.
 - **dbt sidebar** — the dbt icon in the Activity Bar shows Models and Seeds (by folder), Sources, Snapshots and
   Tests (by model), with run / build / test / seed / snapshot buttons on items, **folders and whole sections**, and
-  Compile / Preview / Generate YAML / Show lineage on right-click.
+  Compile / Preview / Generate YAML / Show lineage on right-click. **Ctrl/Shift-click** to select several models,
+  seeds, folders, tests or snapshots, then use a button or right-click: they run as one dbt command.
 - **Lineage** — a view under Project shows the open model's **upstream** (models, seeds, snapshots, sources) and
   **downstream** (models, snapshots, exposures), each expandable level by level; click to open, Build on models.
   It follows the active editor; *Show lineage* pins it to a model until you press *Follow active editor*.

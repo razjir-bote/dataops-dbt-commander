@@ -1,6 +1,17 @@
 import * as path from 'path';
 
 /**
+ * Which tree items a command acts on. VS Code passes (clicked item, selected items): act on the whole selection
+ * when the clicked row is part of it; a button on an unselected row acts on that row only.
+ */
+export function pickSelection<T>(clicked: T | undefined, selected: readonly T[] | undefined): T[] {
+  if (!selected?.length) {
+    return clicked ? [clicked] : [];
+  }
+  return !clicked || selected.includes(clicked) ? [...selected] : [clicked];
+}
+
+/**
  * What a Models / Seeds section stands for when you press Build / Seed on it: its single top-level folder
  * (usually `models/` or `seeds/`), else each top-level folder and file that holds them — never the whole
  * project, which would also build seeds, snapshots and tests the user didn't ask for.

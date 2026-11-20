@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as path from 'path';
 import { parseManifest, relatives } from '../manifest';
-import { levelOf, sectionTargets } from '../tree';
+import { levelOf, pickSelection, sectionTargets } from '../tree';
 
 const root = path.join('C:/p');
 const manifest = JSON.stringify({
@@ -51,6 +51,15 @@ test('sectionTargets: one top folder, or each top folder/file — never the whol
   const two = [path.join(root, 'models', 'a.sql'), path.join(root, 'marts', 'b.sql'), path.join(root, 'top.sql')];
   assert.deepEqual(sectionTargets(root, two), [path.join(root, 'marts'), path.join(root, 'models'), path.join(root, 'top.sql')]);
   assert.deepEqual(sectionTargets(root, []), []);
+});
+
+test('pickSelection: the whole selection when the clicked item is in it, else just the clicked item', () => {
+  const a = { n: 'a' }, b = { n: 'b' }, c = { n: 'c' };
+  assert.deepEqual(pickSelection(a, [a, b]), [a, b]);
+  assert.deepEqual(pickSelection(c, [a, b]), [c]); // clicked a button on an unselected row
+  assert.deepEqual(pickSelection(a, undefined), [a]);
+  assert.deepEqual(pickSelection(a, []), [a]);
+  assert.deepEqual(pickSelection(undefined, [a, b]), [a, b]); // command palette / keybinding with a selection
 });
 
 test('levelOf: folders then files directly inside a directory', () => {

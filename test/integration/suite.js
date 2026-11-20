@@ -344,6 +344,38 @@ exports.run = async () => {
     assert.deepEqual(results(), ['snapshot.demo.snap']);
   });
 
+  await step('sidebar multi-select: one dbt command for the whole Ctrl-click selection', async () => {
+    const top = await api.sidebar.getChildren();
+    const models = await api.sidebar.getChildren(await child(top, 'Models'));
+    const seeds = await api.sidebar.getChildren(await child(top, 'Seeds'));
+    const [b, c, stagingFolder] = [await child(models, 'b'), await child(models, 'c'), await child(models, 'staging')];
+    const [s, refFolder] = [await child(seeds, 's'), await child(seeds, 'ref')];
+
+    // Run on two models: VS Code passes (clicked item, selection).
+    await vscode.commands.executeCommand('dbtRunner.tree.run', b, [b, c]);
+    assert.deepEqual(results(), ['model.demo.b', 'model.demo.c']);
+
+    // Build a model, a model folder and a seed folder together.
+    await vscode.commands.executeCommand('dbtRunner.tree.build', b, [b, stagingFolder, refFolder]);
+    const r = results();
+    for (const id of ['model.demo.b', 'model.demo.stg_a', 'seed.demo.countries']) {
+      assert.ok(r.includes(id), `${id} missing from ${r.join(',')}`);
+    }
+    assert.ok(!r.includes('model.demo.c') && !r.includes('seed.demo.s'), 'built more than selected: ' + r.join(','));
+
+    // Seed a seed and a seed folder.
+    await vscode.commands.executeCommand('dbtRunner.tree.seed', s, [s, refFolder]);
+    assert.deepEqual(results(), ['seed.demo.countries', 'seed.demo.s']);
+
+    // A button on a row that isn't part of the selection acts on that row only.
+    await vscode.commands.executeCommand('dbtRunner.tree.run', c, [b, stagingFolder]);
+    assert.deepEqual(results(), ['model.demo.c']);
+
+    // Build on a single seed (seeds are buildable now).
+    await vscode.commands.executeCommand('dbtRunner.tree.build', s, [s]);
+    assert.deepEqual(results(), ['seed.demo.s']);
+  });
+
   const lineageTree = async () => {
     const [focus] = await api.lineage.getChildren();
     assert.ok(focus, 'no lineage focus');

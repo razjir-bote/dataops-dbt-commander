@@ -25,6 +25,7 @@ import { LanguageDeps, clearManifestCache, loadManifest, registerLanguageFeature
 import { Column, appendModel, hasModel, mergeColumns, newModelYaml, parseColumnsOutput, yamlUsable } from './yamlgen';
 import { cleanLine } from './errors';
 import { DbtItem, DbtSidebar } from './sidebar';
+import { pickSelection } from './tree';
 import { DbtTests } from './testing';
 import { DbtLineage } from './lineage';
 
@@ -174,23 +175,30 @@ async function resolveSelection(
   uri: vscode.Uri | undefined,
   uris: vscode.Uri[] | undefined,
   allowFolders: boolean,
-  kind: 'model' | 'seed' = 'model'
+  /** model: .sql files · seed: .csv files · buildable: either (dbt build / test also cover seeds). */
+  kind: 'model' | 'seed' | 'buildable' = 'model'
 ): Promise<Selection | undefined> {
   // Commands are also invoked from the sidebar, with tree items (which carry a resourceUri) instead of Uris.
   const fromUris = (uris ?? []).map(asUri).filter((u): u is vscode.Uri => !!u);
   const single = asUri(uri);
   const picked = fromUris.length ? fromUris : single ? [single] : vscode.window.activeTextEditor ? [vscode.window.activeTextEditor.document.uri] : [];
-  const ext = kind === 'seed' ? /\.csv$/i : /\.sql$/i;
-  const paths = picked
-    .filter(u => u.scheme === 'file')
-    .map(u => u.fsPath)
-    .filter(p => ext.test(p) || (allowFolders && isDir(p)));
+  const ext = kind === 'seed' ? /\.csv$/i : kind === 'buildable' ? /\.(sql|csv)$/i : /\.sql$/i;
+  const paths = [
+    ...new Set(
+      picked
+        .filter(u => u.scheme === 'file')
+        .map(u => u.fsPath)
+        .filter(p => ext.test(p) || (allowFolders && isDir(p)))
+    )
+  ];
 
   if (paths.length === 0) {
     void vscode.window.showErrorMessage(
       kind === 'seed'
-        ? 'dbt Runner: select one or more seed .csv files.'
-        : `dbt Runner: select one or more .sql models${allowFolders ? ' or model folders' : ''}.`
+        ? 'dbt Runner: select one or more seed .csv files or folders.'
+        : kind === 'buildable'
+          ? 'dbt Runner: select one or more models, seeds or folders.'
+          : `dbt Runner: select one or more .sql models${allowFolders ? ' or model folders' : ''}.`
     );
     return undefined;
   }
@@ -223,7 +231,7 @@ const displayName = (p: string) => (isDir(p) ? path.basename(p) + '/' : modelNam
 // ---------- commands ----------
 
 async function runDbt(action: DbtAction, graph: GraphScope, uri?: vscode.Uri, uris?: vscode.Uri[]): Promise<void> {
-  const sel = await resolveSelection(uri, uris, graph === 'none');
+  const sel = await resolveSelection(uri, uris, graph === 'none', graph === 'none' && action !== 'run' ? 'buildable' : 'model');
   const exe = sel && (await requireExe());
   if (!sel || !exe) {
     return;
@@ -626,29 +634,43 @@ async function refreshTarget(): Promise<void> {
 
 // ---------- activation ----------
 
-/** Run a dbt command for one node selected by name (sidebar tests and snapshots). */
-async function runNode(item: DbtItem | undefined, action: 'test' | 'snapshot'): Promise<void> {
-  const name = item?.data.name;
-  const exe = name && (await requireExe());
-  if (!item || !name || !exe) {
+/** Run a dbt command for sidebar tests / snapshots selected by name (one or several). */
+async function runNodes(items: DbtItem[], action: 'test' | 'snapshot'): Promise<void> {
+  const nodes = items.filter(i => i.data?.name && i.kind === (action === 'test' ? 'test' : 'snapshot'));
+  if (!nodes.length) {
     return;
   }
+  const roots = new Set(nodes.map(n => n.root));
+  if (roots.size > 1) {
+    void vscode.window.showErrorMessage('dbt Runner: selection spans several dbt projects. Run them separately.');
+    return;
+  }
+  const exe = await requireExe();
+  if (!exe) {
+    return;
+  }
+  const root = nodes[0].root;
   // A singular test (its own .sql file) is selected by path: a bare name could also match a model of
   // the same name and run that model's tests too. Generic tests (defined in YAML) are selected by name.
-  const file = item.resourceUri?.fsPath;
-  const selector = file && /\.sql$/i.test(file) ? modelSelector(item.root, file) : name;
+  const selectors = nodes.map(n => {
+    const file = n.resourceUri?.fsPath;
+    return file && /\.sql$/i.test(file) ? modelSelector(root, file) : n.data.name!;
+  });
   await runDbtTask({
     exe,
-    args: [action, '--select', selector, ...flagArgs(cfg().get<string>('target', ''), cfg().get<string>('extraArgs', ''))],
-    cwd: item.root,
-    title: `${action} ${name}`,
+    args: [action, '--select', ...selectors, ...flagArgs(cfg().get<string>('target', ''), cfg().get<string>('extraArgs', ''))],
+    cwd: root,
+    title: `${action} ${nodes.map(n => n.data.name).join(' ')}`,
     diagnostics,
-    targetDir: targetDirOf(item.root),
-    folder: workspaceFolderOf(item.root)
+    targetDir: targetDirOf(root),
+    folder: workspaceFolderOf(root)
   });
 }
 
-const treeTargets = (item: DbtItem): vscode.Uri[] | undefined => item.data?.targets?.map(t => vscode.Uri.file(t));
+/** Files / folders a set of sidebar items stands for (sections expand to their target folders). */
+const treeUris = (items: DbtItem[]): vscode.Uri[] =>
+  items.flatMap(i => (i.data?.targets?.length ? i.data.targets.map(t => vscode.Uri.file(t)) : i.resourceUri ? [i.resourceUri] : []));
+const treeSel = (item: DbtItem | undefined, selected: DbtItem[] | undefined) => pickSelection(item, selected);
 
 async function projectRoots(): Promise<string[]> {
   const found = await vscode.workspace.findFiles('**/dbt_project.yml', '**/{dbt_packages,target,node_modules,.venv,venv,.vscode-test}/**', 50);
@@ -716,19 +738,26 @@ export function activate(ctx: vscode.ExtensionContext): { sidebar: DbtSidebar; t
   const sidebar = new DbtSidebar(languageDeps);
   ctx.subscriptions.push(
     sidebar,
-    vscode.window.createTreeView('dbtRunner.project', { treeDataProvider: sidebar, showCollapseAll: true }),
+    vscode.window.createTreeView('dbtRunner.project', { treeDataProvider: sidebar, showCollapseAll: true, canSelectMany: true }),
     vscode.commands.registerCommand('dbtRunner.refreshSidebar', () => sidebar.refresh()),
     vscode.commands.registerCommand('dbtRunner.parse', async (item?: DbtItem) => {
       await projectCommand(['parse'], 'parse', item?.root);
       sidebar.refresh();
     }),
-    // Section items carry their target folders (data.targets); everything else acts on its resourceUri.
-    vscode.commands.registerCommand('dbtRunner.tree.run', (item: DbtItem) => runDbt('run', 'none', item.resourceUri, treeTargets(item))),
-    vscode.commands.registerCommand('dbtRunner.tree.build', (item: DbtItem) => runDbt('build', 'none', item.resourceUri, treeTargets(item))),
-    vscode.commands.registerCommand('dbtRunner.tree.test', (item: DbtItem) => runDbt('test', 'none', item.resourceUri, treeTargets(item))),
-    vscode.commands.registerCommand('dbtRunner.tree.seed', (item: DbtItem) => seedFiles(item.resourceUri, treeTargets(item))),
-    vscode.commands.registerCommand('dbtRunner.tree.snapshot', (item: DbtItem) => runNode(item, 'snapshot')),
-    vscode.commands.registerCommand('dbtRunner.tree.runTest', (item: DbtItem) => runNode(item, 'test')),
+    // VS Code passes (clicked item, selected items): act on the whole Ctrl/Shift-click selection, in one dbt
+    // command. Section items carry their target folders (data.targets); everything else its resourceUri.
+    vscode.commands.registerCommand('dbtRunner.tree.run', (item?: DbtItem, selected?: DbtItem[]) =>
+      runDbt('run', 'none', undefined, treeUris(treeSel(item, selected)))
+    ),
+    vscode.commands.registerCommand('dbtRunner.tree.build', (item?: DbtItem, selected?: DbtItem[]) =>
+      runDbt('build', 'none', undefined, treeUris(treeSel(item, selected)))
+    ),
+    vscode.commands.registerCommand('dbtRunner.tree.test', (item?: DbtItem, selected?: DbtItem[]) =>
+      runDbt('test', 'none', undefined, treeUris(treeSel(item, selected)))
+    ),
+    vscode.commands.registerCommand('dbtRunner.tree.seed', (item?: DbtItem, selected?: DbtItem[]) => seedFiles(undefined, treeUris(treeSel(item, selected)))),
+    vscode.commands.registerCommand('dbtRunner.tree.snapshot', (item?: DbtItem, selected?: DbtItem[]) => runNodes(treeSel(item, selected), 'snapshot')),
+    vscode.commands.registerCommand('dbtRunner.tree.runTest', (item?: DbtItem, selected?: DbtItem[]) => runNodes(treeSel(item, selected), 'test')),
     vscode.commands.registerCommand('dbtRunner.tree.snapshotAll', (item: DbtItem) => projectCommand(['snapshot'], 'snapshot', item.root))
   );
 
