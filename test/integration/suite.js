@@ -972,5 +972,67 @@ exports.run = async () => {
     }
   });
 
+  // ----- v0.11: preview data for export, column profile, relationships / dbt_utils quick fixes -----
+
+  await step('preview keeps the rows for Copy / Save CSV', async () => {
+    await vscode.commands.executeCommand('dbtCommander.preview', uri('models', 'b.sql'));
+    const data = api.query.previewData();
+    assert.ok(data && data.columns.includes('id') && data.rows.length > 0, JSON.stringify(data));
+  });
+
+  await step('column profile: a model column (YAML lightbulb) and a source column', async () => {
+    const yml = await vscode.workspace.openTextDocument(uri('models', 'schema.yml'));
+    const line = yml.getText().split(/\r?\n/).findIndex(l => /^      - name: id\s*$/.test(l));
+    assert.ok((await actionsAt(yml.uri, line)).some(a => a.title === 'Profile column id'), 'no Profile action');
+    let r = await api.query.profileYamlColumn(yml.uri, line);
+    assert.ok(r && r.rows, JSON.stringify(r));
+    const stat = name => r.rows.find(x => x.statistic === name);
+    assert.ok(stat('rows') && Number(stat('rows').value) > 0, JSON.stringify(r.rows));
+    assert.match(String(stat('nulls').value), /^0 \(0%\)$/);
+    assert.ok(stat('top value 1') && stat('top value 1').count > 0);
+
+    const src = file('models', 'zz_src2.yml');
+    fs.writeFileSync(src, 'version: 2\nsources:\n  - name: seeded2\n    schema: main\n    tables:\n      - name: s\n        columns:\n          - name: name\n');
+    try {
+      const doc = await vscode.workspace.openTextDocument(src);
+      const titles = (await actionsAt(doc.uri, 7)).map(a => a.title);
+      assert.deepEqual(titles.filter(t => /^(Add|Profile)/.test(t)), ['Profile column name'], 'sources get profile only');
+      r = await api.query.profileYamlColumn(doc.uri, 7);
+      assert.ok(r && r.rows && r.rows.find(x => x.statistic === 'distinct'), JSON.stringify(r));
+    } finally {
+      await closeAll();
+      fs.rmSync(src, { force: true });
+    }
+  });
+
+  await step('quick fixes: relationships test (dbt accepts it); no dbt_utils tests without the package', async () => {
+    const model = file('models', 'zz_rel.sql');
+    fs.writeFileSync(model, "select id as b_id from {{ ref('b') }}\n");
+    const f = file('models', 'schema.yml');
+    const original = fs.readFileSync(f, 'utf8');
+    try {
+      fs.writeFileSync(f, original.replace(/\s*$/, '\n') + '  - name: zz_rel\n    columns:\n      - name: b_id\n');
+      const doc = await vscode.workspace.openTextDocument(f);
+      // schema.yml may already be open (profile step): wait for VS Code to pick up the change on disk.
+      await waitFor('schema.yml reload', () => doc.getText().includes('zz_rel'));
+      const line = doc.getText().split(/\r?\n/).lastIndexOf('      - name: b_id');
+      const titles = (await actionsAt(doc.uri, line)).map(a => a.title);
+      assert.ok(titles.includes('Add relationships test to b_id…'), titles.join(', '));
+      assert.ok(!titles.some(t => t.includes('dbt_utils')), 'dbt_utils offered without the package');
+      assert.ok(await api.query.addColumnTests(doc.uri, line, [{ test: 'relationships', args: { to: "ref('b')", field: 'id' } }]));
+      assert.match(doc.getText(), /- relationships:\r?\n\s+arguments:\r?\n\s+to: ref\('b'\)\r?\n\s+field: id/);
+      await doc.save();
+      await vscode.commands.executeCommand('dbtCommander.build', vscode.Uri.file(model), [vscode.Uri.file(model)]);
+      const r = results();
+      assert.ok(r.some(x => x.startsWith('test.demo.relationships_zz_rel_b_id')), r.join(','));
+      const rr = JSON.parse(fs.readFileSync(file('target', 'run_results.json'), 'utf8'));
+      assert.ok(rr.results.every(x => x.status === 'success' || x.status === 'pass'), JSON.stringify(rr.results.map(x => [x.unique_id, x.status])));
+    } finally {
+      await closeAll();
+      fs.writeFileSync(f, original);
+      fs.rmSync(model, { force: true });
+    }
+  });
+
   fs.writeFileSync(process.env.ITEST_OUT, out.join('\n'));
 };

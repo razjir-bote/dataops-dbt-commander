@@ -1,6 +1,12 @@
 /** Quick-fix edits for model columns in dbt YAML files, made as plain text insertions. */
 
-export type TestSpec = string | { accepted_values: string[] };
+import { ColumnOwner } from './profile';
+
+/**
+ * A test to add: a name (`unique`, `dbt_utils.not_constant`), accepted_values, or a test with arguments given as
+ * YAML scalars (`{ test: 'relationships', args: { to: "ref('customers')", field: 'id' } }`).
+ */
+export type TestSpec = string | { accepted_values: string[] } | { test: string; args: Record<string, string> };
 
 export interface ColumnRef {
   model: string;
@@ -46,7 +52,19 @@ function blockEnd(lines: string[], line: number, indent: number, indentlessDashe
   return end;
 }
 
-function columnItem(lines: string[], line: number): { item: number; model: string; column: string } | undefined {
+/** The \`- name:\` list item owning a \`columns:\` / \`tables:\` key line, if any. */
+function ownerItem(lines: string[], keyLine: number): number {
+  for (let k = keyLine - 1; k >= 0; k--) {
+    if (!ignorable(lines[k]) && indentOf(lines[k]) < indentOf(lines[keyLine])) {
+      return NAME_ITEM.test(lines[k]) ? k : -1;
+    }
+  }
+  return -1;
+}
+
+const KINDS: Record<string, ColumnOwner['kind']> = { models: 'model', seeds: 'seed', snapshots: 'snapshot' };
+
+function columnItem(lines: string[], line: number): { item: number; owner: ColumnOwner; column: string } | undefined {
   let item = -1;
   for (let k = line; k >= 0; k--) {
     if (ignorable(lines[k])) {
@@ -64,19 +82,24 @@ function columnItem(lines: string[], line: number): { item: number; model: strin
   if (cols < 0 || !/^\s*columns:\s*(#.*)?$/.test(lines[cols])) {
     return undefined;
   }
-  let modelItem = -1;
-  for (let k = cols - 1; k >= 0; k--) {
-    if (!ignorable(lines[k]) && indentOf(lines[k]) < indentOf(lines[cols])) {
-      modelItem = k;
-      break;
-    }
-  }
-  const mm = modelItem >= 0 ? NAME_ITEM.exec(lines[modelItem]) : null;
-  const models = modelItem >= 0 ? parentKeyLine(lines, modelItem) : -1;
-  if (!mm || models < 0 || !/^\s*models:\s*(#.*)?$/.test(lines[models])) {
+  const column = unquote(NAME_ITEM.exec(lines[item])![2]);
+  const owner = ownerItem(lines, cols);
+  const list = owner >= 0 ? parentKeyLine(lines, owner) : -1;
+  const key = list >= 0 ? /^\s*(models|seeds|snapshots|tables):\s*(#.*)?$/.exec(lines[list])?.[1] : undefined;
+  if (!key) {
     return undefined;
   }
-  return { item, model: unquote(mm[2]), column: unquote(NAME_ITEM.exec(lines[item])![2]) };
+  const name = unquote(NAME_ITEM.exec(lines[owner])![2]);
+  if (key !== 'tables') {
+    // Top-level lists only (\`models:\` inside something else is not a resource list).
+    return indentOf(lines[list]) === 0 ? { item, owner: { kind: KINDS[key], name }, column } : undefined;
+  }
+  const source = ownerItem(lines, list);
+  const sources = source >= 0 ? parentKeyLine(lines, source) : -1;
+  if (sources < 0 || !/^sources:\s*(#.*)?$/.test(lines[sources])) {
+    return undefined;
+  }
+  return { item, owner: { kind: 'source', source: unquote(NAME_ITEM.exec(lines[source])![2]), name }, column };
 }
 
 function testsKeyLine(lines: string[], item: number): { line: number; key: 'data_tests' | 'tests' } | undefined {
@@ -98,24 +121,33 @@ export function columnAt(text: string, line: number): ColumnRef | undefined {
     return undefined;
   }
   const c = columnItem(lines, line);
-  if (!c) {
+  if (!c || c.owner.kind !== 'model') {
     return undefined;
   }
-  return { model: c.model, column: c.column, testsKey: testsKeyLine(lines, c.item)?.key };
+  return { model: c.owner.name, column: c.column, testsKey: testsKeyLine(lines, c.item)?.key };
 }
 
-const testName = (t: TestSpec) => (typeof t === 'string' ? t : 'accepted_values');
+/** The model / seed / snapshot / source column whose YAML entry contains \`line\` (0-based), if any. */
+export function columnOwnerAt(text: string, line: number): (ColumnOwner & { column: string }) | undefined {
+  const lines = text.split(/\r?\n/);
+  const c = line >= 0 && line < lines.length ? columnItem(lines, line) : undefined;
+  return c && { ...c.owner, column: c.column };
+}
+
+const testName = (t: TestSpec) => (typeof t === 'string' ? t : 'accepted_values' in t ? 'accepted_values' : t.test);
 
 function testLines(t: TestSpec, dash: number, legacy: boolean): string[] {
   const sp = (n: number) => ' '.repeat(n);
   if (typeof t === 'string') {
     return [`${sp(dash)}- ${t}`];
   }
-  const values = `values: [${t.accepted_values.map(v => JSON.stringify(v)).join(', ')}]`;
+  const args: Record<string, string> =
+    'accepted_values' in t ? { values: `[${t.accepted_values.map(v => JSON.stringify(v)).join(', ')}]` } : t.args;
+  const argLines = (indent: number) => Object.entries(args).map(([k, v]) => `${sp(indent)}${k}: ${v}`);
   // dbt 1.10+ wants test arguments under `arguments:` (and warns otherwise); older versions don't know the key.
   return legacy
-    ? [`${sp(dash)}- accepted_values:`, `${sp(dash + 4)}${values}`]
-    : [`${sp(dash)}- accepted_values:`, `${sp(dash + 4)}arguments:`, `${sp(dash + 6)}${values}`];
+    ? [`${sp(dash)}- ${testName(t)}:`, ...argLines(dash + 4)]
+    : [`${sp(dash)}- ${testName(t)}:`, `${sp(dash + 4)}arguments:`, ...argLines(dash + 6)];
 }
 
 /**
@@ -135,7 +167,7 @@ export function addTestsEdit(
     return undefined;
   }
   const c = columnItem(lines, line);
-  if (!c) {
+  if (!c || c.owner.kind !== 'model') {
     return undefined;
   }
   const keyIndent = lines[c.item].indexOf('name:');
@@ -164,7 +196,8 @@ export function addTestsEdit(
         present.add(named[1]);
       }
     }
-    const add = tests.filter(t => !present.has(testName(t)));
+    // Plain tests once per column; tests with arguments (relationships, accepted_range…) may repeat.
+    const add = tests.filter(t => typeof t !== 'string' || !present.has(t));
     if (!add.length) {
       return undefined;
     }

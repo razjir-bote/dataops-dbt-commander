@@ -2,7 +2,7 @@
   "name": "dataops-dbt-commander",
   "displayName": "DataOps dbt Commander",
   "description": "Run, build, test, compile and preview dbt models from the VS Code Explorer and editor with dbt-core 1.x from a configured venv.",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "publisher": "local",
   "license": "MIT",
   "engines": {
@@ -239,6 +239,11 @@
         "command": "dbtCommander.addColumnTests",
         "title": "Add column tests",
         "category": "dbt Commander"
+      },
+      {
+        "command": "dbtCommander.profileColumn",
+        "title": "Profile column",
+        "category": "dbt Commander"
       }
     ],
     "submenus": [
@@ -469,6 +474,10 @@
         {
           "command": "dbtCommander.previewSelection",
           "when": "editorIsOpen && (dbtCommander.isScratchpad || resourceExtname =~ /^\\.sql$/i && (resourcePath =~ /[\\\\/]models([\\\\/]|$)/i || resourcePath in dbtCommander.modelPaths) && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i)"
+        },
+        {
+          "command": "dbtCommander.profileColumn",
+          "when": "false"
         }
       ],
       "view/title": [

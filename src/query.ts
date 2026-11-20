@@ -4,9 +4,12 @@ import * as path from 'path';
 import { execFile } from 'child_process';
 import { cteQueryAt, inlineSql } from './scratch';
 import { ShowResult, parseShowOutput } from './show';
-import { PreviewPanel } from './previewPanel';
+import { PreviewOptions, PreviewPanel } from './previewPanel';
+import { ColumnOwner, isMinMaxError, profileRows, profileSql, relationSql, yamlColumnSql } from './profile';
+import { columnRef } from './scaffold';
+import { scalar } from './yamlgen';
 import { killTree } from './runner';
-import { TestSpec, addTestsEdit, columnAt, legacyTestArguments } from './yamlfix';
+import { TestSpec, addTestsEdit, columnAt, columnOwnerAt, legacyTestArguments } from './yamlfix';
 
 export interface QueryDeps {
   requireExe(): Promise<string | undefined>;
@@ -23,17 +26,37 @@ export interface QueryDeps {
   isProjectYaml(file: string): boolean;
   /** The model has no YAML entry yet (from the manifest). */
   lacksYaml(file: string): Promise<boolean>;
+  /** A package's macros are in the project's manifest (it is installed). */
+  hasPackage(root: string, pkg: string): Promise<boolean>;
+  /** The project's models and sources, for picking a relationships parent. */
+  relations(root: string): Promise<{ label: string; description?: string; to: string; uniqueId: string }[]>;
+  /** Known column names of a node (documented in YAML, or from catalog.json). */
+  columnNames(root: string, uniqueId: string): Promise<string[]>;
+}
+
+export interface ShowOptions extends PreviewOptions {
+  /** Reshape the rows before they're shown (e.g. a profile). */
+  transform?: (rows: Record<string, unknown>[]) => Record<string, unknown>[];
+  /** Row limit instead of dbtCommander.previewLimit. */
+  limit?: number;
 }
 
 let previewSeq = 0;
 
 /** Run `dbt show … --output json` and show the rows in the preview panel (Refresh re-runs it). */
-export async function runShow(exe: string, cwd: string, title: string, select: string[], deps: QueryDeps): Promise<ShowResult | undefined> {
-  const limit = deps.previewLimit();
+export async function runShow(
+  exe: string,
+  cwd: string,
+  title: string,
+  select: string[],
+  deps: QueryDeps,
+  options: ShowOptions = {}
+): Promise<ShowResult | undefined> {
+  const limit = options.limit ?? deps.previewLimit();
   const args = [...deps.showArgs(select), '--limit', String(limit), '--output', 'json', '--log-format', 'json'];
   const run = async (): Promise<ShowResult | undefined> => {
     const seq = ++previewSeq;
-    const panel = PreviewPanel.loading(title, () => void run());
+    const panel = PreviewPanel.loading(title, () => void run(), options);
     const started = Date.now();
     const output = await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: `dbt show ${title}`, cancellable: true },
@@ -48,7 +71,8 @@ export async function runShow(exe: string, cwd: string, title: string, select: s
           token.onCancellationRequested(() => killTree(child));
         })
     );
-    const result = parseShowOutput(output);
+    const parsed = parseShowOutput(output);
+    const result = parsed.rows && options.transform ? { rows: options.transform(parsed.rows) } : parsed;
     if (seq !== previewSeq) {
       return undefined; // a newer preview replaced this one: drop the stale result
     }
@@ -148,6 +172,45 @@ export async function previewSelection(deps: QueryDeps, editor = vscode.window.a
   return exe ? runShow(exe, root, title, ['--inline', sql], deps) : undefined;
 }
 
+/** Profile one column (rows, nulls, distinct, min, max, top values) in the preview panel. */
+/**
+ * Profile one column of the built table / view (rows, nulls, distinct, min, max, top values) in the preview panel.
+ * \`fromYaml\`: the name is as written in YAML (bare unless it needs quoting), not as the warehouse returned it.
+ */
+export async function profileColumn(
+  deps: QueryDeps,
+  root: string,
+  owner: ColumnOwner,
+  column: string,
+  fromYaml = false
+): Promise<ShowResult | undefined> {
+  const exe = await deps.requireExe();
+  if (!exe) {
+    return undefined;
+  }
+  const where = owner.kind === 'source' ? `${owner.source}.${owner.name}` : owner.name;
+  const sql = fromYaml ? yamlColumnSql(column) : columnRef(column);
+  const run = (minMax: boolean) =>
+    runShow(exe, root, `${where}.${column} profile`, ['--inline', profileSql(relationSql(owner), sql, { minMax, columnIsSql: true })], deps, {
+      transform: profileRows,
+      limit: 50
+    });
+  const result = await run(true);
+  // e.g. Postgres uuid / boolean columns have no min() / max(): profile the rest.
+  return result && isMinMaxError(result.error) ? run(false) : result;
+}
+
+/** Profile the YAML column at `line` of a file. */
+export async function profileYamlColumn(deps: QueryDeps, uri: vscode.Uri, line: number): Promise<ShowResult | undefined> {
+  const doc = await vscode.workspace.openTextDocument(uri);
+  const col = columnOwnerAt(doc.getText(), line);
+  const root = deps.projectRootOf(uri.fsPath);
+  if (!col || !root) {
+    return undefined;
+  }
+  return profileColumn(deps, root, col, col.column, true);
+}
+
 /** Keeps `dbtCommander.isScratchpad` in step with the active editor (for the Ctrl+Enter keybinding). */
 export function trackScratchpads(): vscode.Disposable {
   const update = (e: vscode.TextEditor | undefined) => vscode.commands.executeCommand('setContext', 'dbtCommander.isScratchpad', isScratchpad(e?.document));
@@ -171,11 +234,86 @@ function testsEdit(doc: vscode.TextDocument, line: number, tests: TestSpec[], de
   return edit;
 }
 
-/** Add tests to the YAML column at `line`; accepted_values asks for its values. */
-export async function addColumnTests(deps: QueryDeps, uri: vscode.Uri, line: number, tests: TestSpec[] | 'accepted_values'): Promise<boolean> {
+export type AskedTest = 'accepted_values' | 'relationships' | 'accepted_range';
+
+/** relationships: pick the parent model / source, then its column. */
+async function askRelationships(deps: QueryDeps, root: string, column: string): Promise<TestSpec | undefined> {
+  const parents = await deps.relations(root);
+  if (!parents.length) {
+    void vscode.window.showWarningMessage('dbt Commander: no models or sources found — run dbt parse first.');
+    return undefined;
+  }
+  const parent = await vscode.window.showQuickPick(parents, { title: `relationships: ${column} references…`, placeHolder: 'Parent model or source', matchOnDescription: true });
+  if (!parent) {
+    return undefined;
+  }
+  const known = await deps.columnNames(root, parent.uniqueId);
+  const other = '$(edit) Another column…';
+  let field: string | undefined;
+  if (known.length) {
+    const pick = await vscode.window.showQuickPick([...known, other], { title: `relationships: ${column} → ${parent.label}.?`, placeHolder: 'Column in the parent' });
+    if (!pick) {
+      return undefined;
+    }
+    field = pick === other ? undefined : pick;
+  }
+  field ??= await vscode.window.showInputBox({
+    title: `relationships: ${column} → ${parent.label}.?`,
+    prompt: 'Column in the parent',
+    value: column,
+    validateInput: v => (v.trim() ? undefined : 'Enter a column name')
+  });
+  return field?.trim() ? { test: 'relationships', args: { to: parent.to, field: scalar(field.trim()) } } : undefined;
+}
+
+/** dbt_utils.accepted_range: min and / or max (numbers). */
+async function askRange(column: string): Promise<TestSpec | undefined> {
+  const NUM = /^-?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$/;
+  const num = (v: string) => (!v.trim() || NUM.test(v.trim()) ? undefined : 'Enter a number, or leave empty');
+  const min = await vscode.window.showInputBox({ title: `dbt_utils.accepted_range for ${column}`, prompt: 'Minimum (empty for none)', validateInput: num });
+  if (min === undefined) {
+    return undefined;
+  }
+  const max = await vscode.window.showInputBox({
+    title: `dbt_utils.accepted_range for ${column}`,
+    prompt: 'Maximum (empty for none)',
+    validateInput: v =>
+      num(v) ??
+      (!v.trim() && !min.trim()
+        ? 'Enter a minimum or a maximum'
+        : v.trim() && min.trim() && Number(v.trim()) < Number(min.trim())
+          ? 'The maximum is below the minimum'
+          : undefined)
+  });
+  if (max === undefined) {
+    return undefined;
+  }
+  const args: Record<string, string> = {};
+  if (min.trim()) {
+    args.min_value = min.trim(); // as typed: no rounding of big or precise numbers
+  }
+  if (max.trim()) {
+    args.max_value = max.trim();
+  }
+  return { test: 'dbt_utils.accepted_range', args };
+}
+
+/** Add tests to the YAML column at `line`; accepted_values / relationships / accepted_range ask for their arguments. */
+export async function addColumnTests(deps: QueryDeps, uri: vscode.Uri, line: number, tests: TestSpec[] | AskedTest): Promise<boolean> {
   const doc = await vscode.workspace.openTextDocument(uri);
   let specs: TestSpec[];
-  if (tests === 'accepted_values') {
+  if (tests === 'relationships' || tests === 'accepted_range') {
+    const col = columnAt(doc.getText(), line);
+    const root = deps.projectRootOf(uri.fsPath);
+    if (!col || !root) {
+      return false;
+    }
+    const spec = tests === 'relationships' ? await askRelationships(deps, root, col.column) : await askRange(col.column);
+    if (!spec) {
+      return false;
+    }
+    specs = [spec];
+  } else if (tests === 'accepted_values') {
     const col = columnAt(doc.getText(), line);
     const input = await vscode.window.showInputBox({
       title: `accepted_values for ${col?.model}.${col?.column}`,
@@ -215,16 +353,27 @@ export class DbtCodeActions implements vscode.CodeActionProvider {
     return undefined;
   }
 
-  private yamlActions(doc: vscode.TextDocument, line: number): vscode.CodeAction[] | undefined {
-    if (!this.deps.projectRootOf(doc.uri.fsPath) || !this.deps.isProjectYaml(doc.uri.fsPath)) {
+  private async yamlActions(doc: vscode.TextDocument, line: number): Promise<vscode.CodeAction[] | undefined> {
+    const root = this.deps.projectRootOf(doc.uri.fsPath);
+    if (!root || !this.deps.isProjectYaml(doc.uri.fsPath)) {
       return undefined;
     }
-    const col = columnAt(doc.getText(), line);
-    if (!col) {
+    const owner = columnOwnerAt(doc.getText(), line);
+    if (!owner) {
       return undefined;
     }
     const out: vscode.CodeAction[] = [];
-    const add = (title: string, tests: string[]) => {
+    const ask = (title: string, command: string, arg: unknown) => {
+      const a = new vscode.CodeAction(title, vscode.CodeActionKind.QuickFix);
+      a.command = { command, title, arguments: [doc.uri, line, arg] };
+      out.push(a);
+    };
+    const col = columnAt(doc.getText(), line);
+    if (!col) {
+      ask(`Profile column ${owner.column}`, 'dbtCommander.profileColumn', undefined);
+      return out; // seeds / snapshots / sources: profile only
+    }
+    const add = (title: string, tests: TestSpec[]) => {
       const edit = testsEdit(doc, line, tests, this.deps);
       if (edit) {
         const a = new vscode.CodeAction(title, vscode.CodeActionKind.QuickFix);
@@ -238,10 +387,20 @@ export class DbtCodeActions implements vscode.CodeActionProvider {
     add(`Add not_null test to ${col.column}`, ['not_null']);
     add(`Add unique test to ${col.column}`, ['unique']);
     if (testsEdit(doc, line, [{ accepted_values: ['x'] }], this.deps)) {
-      const a = new vscode.CodeAction(`Add accepted_values test to ${col.column}…`, vscode.CodeActionKind.QuickFix);
-      a.command = { command: 'dbtCommander.addColumnTests', title: a.title, arguments: [doc.uri, line, 'accepted_values'] };
-      out.push(a);
+      ask(`Add accepted_values test to ${col.column}…`, 'dbtCommander.addColumnTests', 'accepted_values');
     }
+    if (testsEdit(doc, line, [{ test: 'relationships', args: {} }], this.deps)) {
+      ask(`Add relationships test to ${col.column}…`, 'dbtCommander.addColumnTests', 'relationships');
+    }
+    if (await this.deps.hasPackage(root, 'dbt_utils')) {
+      for (const t of ['dbt_utils.not_empty_string', 'dbt_utils.not_constant', 'dbt_utils.at_least_one']) {
+        add(`Add ${t} test to ${col.column}`, [t]);
+      }
+      if (testsEdit(doc, line, [{ test: 'dbt_utils.accepted_range', args: {} }], this.deps)) {
+        ask(`Add dbt_utils.accepted_range test to ${col.column}…`, 'dbtCommander.addColumnTests', 'accepted_range');
+      }
+    }
+    ask(`Profile column ${col.column}`, 'dbtCommander.profileColumn', undefined);
     return out;
   }
 }

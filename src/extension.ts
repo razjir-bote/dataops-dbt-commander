@@ -35,7 +35,9 @@ import { RunStatusStore } from './runstatus';
 import { DbtLastRun } from './lastrun';
 import { MIGRATED_KEYS, Scope, plannedMigrations } from './migrate';
 import { EditDeps, checkConnection, createStagingModel, newModel, openInDocs, renameModel } from './projectedits';
-import { DbtCodeActions, QueryDeps, addColumnTests, newScratchpad, previewSelection, runShow, trackScratchpads } from './query';
+import { DbtCodeActions, QueryDeps, addColumnTests, newScratchpad, previewSelection, profileColumn, profileYamlColumn, runShow, trackScratchpads } from './query';
+import { loadCatalog } from './hover';
+import { PreviewPanel } from './previewPanel';
 
 let statusItem: vscode.StatusBarItem;
 let targetItem: vscode.StatusBarItem;
@@ -552,7 +554,15 @@ async function previewModel(uri?: vscode.Uri): Promise<void> {
     return;
   }
   const file = sel.paths[0];
-  await runShow(exe, sel.root, modelName(file), ['--select', modelSelector(sel.root, file)], queryDeps);
+  const root = sel.root;
+  await runShow(exe, root, modelName(file), ['--select', modelSelector(root, file)], queryDeps, {
+    // Resolved when Σ is pressed: the manifest is fresh by then, and versioned models profile the version shown.
+    onProfile: async column => {
+      const model = (await loadManifest(languageDeps, root))?.models.find(m => m.file.toLowerCase() === file.toLowerCase());
+      const owner = { kind: 'model' as const, name: model?.name ?? modelName(file), ...(model?.version !== undefined ? { version: model.version } : {}) };
+      await profileColumn(queryDeps, root, owner, column);
+    }
+  });
 }
 
 let dbtVersion: string | undefined;
@@ -580,6 +590,41 @@ const queryDeps: QueryDeps = {
     const index = root ? await loadManifest(languageDeps, root) : undefined;
     const model = index?.models.find(m => m.file.toLowerCase() === file.toLowerCase());
     return !!model && !index!.patches.has(model.name);
+  },
+  hasPackage: async (root, pkg) => !!(await loadManifest(languageDeps, root))?.macros.some(m => m.package === pkg),
+  relations: async root => {
+    const index = await loadManifest(languageDeps, root);
+    if (!index) {
+      return [];
+    }
+    const lit = (x: string) => `'${x.replace(/'/g, "\\'")}'`;
+    const project = readProject(root).name ?? path.basename(root);
+    return [
+      ...index.models
+        .filter(m => m.package === project && m.version === undefined)
+        .map(m => ({ label: m.name, description: 'model', to: `ref(${lit(m.name)})`, uniqueId: m.uniqueId })),
+      ...index.seeds.filter(m => m.package === project).map(m => ({ label: m.name, description: 'seed', to: `ref(${lit(m.name)})`, uniqueId: m.uniqueId })),
+      ...index.snapshots.filter(m => m.package === project).map(m => ({ label: m.name, description: 'snapshot', to: `ref(${lit(m.name)})`, uniqueId: m.uniqueId })),
+      ...index.sources.map(x => ({
+        label: `${x.source}.${x.table}`,
+        description: 'source',
+        to: `source(${lit(x.source)}, ${lit(x.table)})`,
+        uniqueId: x.uniqueId
+      }))
+    ].sort((a, b) => a.label.localeCompare(b.label));
+  },
+  columnNames: async (root, uniqueId) => {
+    const index = await loadManifest(languageDeps, root);
+    const documented = [...(index?.models ?? []), ...(index?.sources ?? [])].find(n => n.uniqueId === uniqueId)?.columns ?? [];
+    const catalog = (await loadCatalog(languageDeps, root))?.get(uniqueId) ?? [];
+    // Documented spelling first; the catalog's (e.g. Snowflake's upper case) only for columns not documented.
+    const seen = new Map<string, string>();
+    for (const c of [...documented, ...catalog]) {
+      if (!seen.has(c.name.toLowerCase())) {
+        seen.set(c.name.toLowerCase(), c.name);
+      }
+    }
+    return [...seen.values()];
   }
 };
 
@@ -817,6 +862,9 @@ export interface DbtRunnerApi {
     newScratchpad(root: string): Promise<vscode.TextEditor | undefined>;
     previewSelection(editor: vscode.TextEditor): Promise<ShowResult | undefined>;
     addColumnTests(uri: vscode.Uri, line: number, tests: TestSpec[]): Promise<boolean>;
+    profileYamlColumn(uri: vscode.Uri, line: number): Promise<ShowResult | undefined>;
+    /** Rows held by the preview panel and what Copy / Save CSV would write for a view state. */
+    previewData(): { columns: string[]; rows: Record<string, unknown>[] } | undefined;
   };
 }
 
@@ -897,6 +945,7 @@ export function activate(ctx: vscode.ExtensionContext): DbtRunnerApi {
     vscode.commands.registerCommand('dbtCommander.addColumnTests', (uri: vscode.Uri, line: number, tests: Parameters<typeof addColumnTests>[3]) =>
       addColumnTests(queryDeps, uri, line, tests)
     ),
+    vscode.commands.registerCommand('dbtCommander.profileColumn', (uri: vscode.Uri, line: number) => profileYamlColumn(queryDeps, uri, line)),
     vscode.languages.registerCodeActionsProvider(
       [{ scheme: 'file', pattern: '**/*.{yml,yaml}' }, { scheme: 'file', pattern: '**/*.sql' }],
       new DbtCodeActions(queryDeps),
@@ -1079,7 +1128,9 @@ export function activate(ctx: vscode.ExtensionContext): DbtRunnerApi {
     query: {
       newScratchpad: root => newScratchpad(queryDeps, root),
       previewSelection: editor => previewSelection(queryDeps, editor),
-      addColumnTests: (uri, line, tests) => addColumnTests(queryDeps, uri, line, tests)
+      addColumnTests: (uri, line, tests) => addColumnTests(queryDeps, uri, line, tests),
+      profileYamlColumn: (uri, line) => profileYamlColumn(queryDeps, uri, line),
+      previewData: () => PreviewPanel.active?.data
     }
   };
 }

@@ -1,7 +1,7 @@
 # DataOps dbt Commander — developer handover
 
 Keep this file current: update it in the same commit as any change to features, architecture, build/release
-process, or known issues. Last updated: 2026-11-21 (v0.10.0 released).
+process, or known issues. Last updated: 2026-11-21 (v0.11.0 released).
 
 ## What this is
 A VS Code extension (TypeScript) for working with **dbt-core 1.x** (tested with 1.12.7) on **Windows**, running
@@ -14,6 +14,16 @@ Since v0.9.0 the extension ID is `local.dataops-dbt-commander` and every command
 is `dbtCommander.*`; `migrate.ts` copies old `dbtRunner.*` user and workspace settings once on activation.
 
 ## Status
+- **v0.11.0 — released** (https://github.com/razjir-bote/dataops-dbt-commander/releases/tag/v0.11.0): preview table sort / filter / Copy (TSV) /
+  Save CSV (`exportrows.ts`; the webview runs `viewRows.toString()`, so the function must stay self-contained;
+  Copy / Save recompute from the view state in the extension), column profile (`profile.ts`: one inline query with
+  `dbt.type_string()` / `dbt.type_bigint()`; YAML lightbulb on model / seed / snapshot / source columns and Σ in model
+  previews), relationships + dbt_utils test quick fixes (`yamlfix.ts` tests with args; `columnOwnerAt`). Design:
+  `docs/superpowers/specs/2026-11-21-dbt-commander-v0.11-design.md`. From the review: profile rows are re-sorted
+  client-side (dbt show's limit wrapper can drop the inner order by); a min()/max() error re-runs the profile without
+  them (Postgres uuid / boolean); YAML column names stay bare unless they need quoting. Not done (minor): CSV / TSV
+  cells starting with `=`, `+`, `-`, `@` are not guarded against spreadsheet formula injection; a column's
+  `quote: true` in YAML is not read when profiling.
 - **v0.10.0 — released** (https://github.com/razjir-bote/dataops-dbt-commander/releases/tag/v0.10.0): SQL scratchpad (`query.ts`: untitled
   `dbt-scratch-N.sql` in the project folder, recognised by name so it survives hot exit; context key
   `dbtCommander.isScratchpad` scopes Ctrl+Enter), preview selection / CTE (`dbtCommander.previewSelection`,
@@ -62,7 +72,7 @@ npm run package              # esbuild → dist/extension.js, then vsce → .vsi
 - **Integration suite** (`test/integration/run.js` + `suite.js`): copies `test/fixtures/demo` to
   `.vscode-test/work/demo`, creates `.vscode-test/dbt-venv` (dbt-core~=1.12.0 + dbt-duckdb) on first run
   (`DBT_PYTHON` picks the Python; default `py -3.12` on Windows), launches VS Code with the extension and prints
-  `PASS`/`FAIL` lines; exits 1 on any FAIL. ~4–5 min. Currently 61 checks; the v0.10 ones are last because they add a
+  `PASS`/`FAIL` lines; exits 1 on any FAIL. ~4–5 min. Currently 64 checks; the v0.10 ones are last because they add a
   temporary model and feed a fake run_results file to the run-state store (which then is "the last run"). The suite talks to the extension
   through the API returned by `activate()` (`sidebar`, `tests`, `lineage`, `runStatus`, `projectEdits`, `query`, …).
 - **CI** (`.github/workflows/ci.yml`): windows-latest, Node 22, Python 3.12; typecheck, unit, integration,
@@ -100,6 +110,7 @@ npm run package              # esbuild → dist/extension.js, then vsce → .vsi
 | `testing.ts` | Testing panel controller; runs `dbt test`, maps run_results; snapshot-based runs |
 | `settingsPanel.ts` | settings webview (venv, target, extra flags) |
 | `query.ts` | `runShow` (shared by Preview Data), scratchpads, preview selection / CTE, YAML quick-fix code actions |
+| `exportrows.ts` / `profile.ts` | pure: preview sort / filter / CSV / TSV / profile query + display rows |
 | `scratch.ts` / `yamlfix.ts` / `macrohover.ts` | pure: CTE parser + inline SQL / column test insertions / macro signature + hover text |
 
 Design docs per version: `docs/superpowers/specs/`, plans: `docs/superpowers/plans/`.

@@ -20,6 +20,8 @@ Supports dbt-core 1.x (tested with 1.12); not dbt 2 / Fusion.
   `B` build · `R` run · `T` test · `C` compile · `P` preview · `Q` preview selection / CTE.
 - **dbt Compile** opens the compiled SQL beside the model.
 - **dbt Preview Data** runs `dbt show` and shows the rows in a table (limit: `dbtCommander.previewLimit`, default 100).
+  Click a header to sort, type in the filter box to narrow the rows, then **Copy** (tab-separated, pastes into
+  Excel / Sheets) or **Save CSV…** — both take the rows as shown. **Σ** on a header profiles that column.
 - **Errors in the Problems panel**: compilation/runtime/database errors on the model (with the line when dbt
   gives one), test failures and warnings on the YAML file. A model's problems are replaced when it runs again.
 - **Target switcher** in the status bar, listing the targets from your `profiles.yml`.
@@ -84,6 +86,10 @@ Supports dbt-core 1.x (tested with 1.12); not dbt 2 / Fusion.
 - **Add tests from YAML** — the lightbulb on a model column in YAML (`- name: id` under `columns:`) adds
   `unique`, `not_null`, both, or `accepted_values` (asks for the values) to its `data_tests:` / `tests:` list.
   On the first line of a model with no YAML entry, the lightbulb offers *Generate YAML for this model*.
+- **Column profile** — the lightbulb on a model, seed, snapshot or source column in YAML (or Σ in a model preview)
+  shows row count, nulls, distinct values, min, max and the 10 most common values, from one `dbt show` query.
+- **More tests from YAML** — *Add relationships test…* (pick the parent model / source and its column), and with
+  dbt_utils installed: `not_empty_string`, `not_constant`, `at_least_one`, `accepted_range…`.
 - **Hover on macros** — signature, description and documented arguments (from `macros:` YAML) of a macro call.
 - Saved last-run results of models / tests that no longer exist are dropped when the manifest changes.
 

@@ -26,7 +26,7 @@ const RESERVED = new Set([
  * A column as written in generated SQL: plain identifiers stay bare; anything else (spaces, mixed case, reserved
  * words) goes through `adapter.quote`, so each warehouse gets its own quoting.
  */
-function columnRef(name: string): string {
+export function columnRef(name: string): string {
   const plain = /^[a-z_][a-z0-9_]*$/.test(name) || /^[A-Z_][A-Z0-9_]*$/.test(name);
   return plain && !RESERVED.has(name.toLowerCase()) ? name : `{{ adapter.quote('${name.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}') }}`;
 }
