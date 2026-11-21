@@ -14,6 +14,10 @@ export interface Scd2Rules {
   hashColumns: string[];
   /** The staging model's extract date, matched against the history's `valid_from`. */
   extractDateColumn: string;
+  /** Where the candidate / history / published models go (relative to the project). */
+  generatedFolder: string;
+  /** Where the gates test goes (a singular test, so under the project's test paths). */
+  testsFolder: string;
 }
 
 export const SCD2_DEFAULTS: Scd2Rules = {
@@ -21,7 +25,9 @@ export const SCD2_DEFAULTS: Scd2Rules = {
   historyPrefix: 'dim_',
   changeKeyFolder: 'models/intermediate/changekey',
   hashColumns: ['versionnumber', '_full_row_hash'],
-  extractDateColumn: '_landing_extract_date'
+  extractDateColumn: '_landing_extract_date',
+  generatedFolder: 'models/intermediate/scd2/generated',
+  testsFolder: 'tests/scd2/generated'
 };
 
 const bracket = (name: string) => `[${name.replace(/]/g, ']]')}]`;
@@ -31,6 +37,28 @@ const lit = (s: string) => `'${s.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
 export function changeKeyNames(stagingModel: string, rules: Scd2Rules): { model: string; history: string } | undefined {
   const m = /^stg_(.+)$/i.exec(stagingModel);
   return m ? { model: `int_${m[1]}_changekey`, history: `${rules.historyPrefix}${m[1]}__history` } : undefined;
+}
+
+/** The SCD2 files after the change-key model, each a call to one of the project's macros. `test`: a singular test. */
+const SCD2_STAGES: { suffix: string; macro: string; test?: boolean }[] = [
+  { suffix: 'candidate', macro: 'scd2_candidate' },
+  { suffix: 'history', macro: 'scd2_history' },
+  { suffix: 'published', macro: 'scd2_published' },
+  { suffix: 'gates', macro: 'scd2_gate_test', test: true }
+];
+
+/**
+ * For a staging model: `dim_<source>__<entity>__candidate` / `__history` / `__published` (models) and `__gates` (a
+ * singular test), each one line calling the project's `scd2_candidate` / `scd2_history` / `scd2_published` /
+ * `scd2_gate_test` macro with `dim_<source>__<entity>`.
+ */
+export function scd2GeneratedModels(stagingModel: string, rules: Scd2Rules): { name: string; macro: string; sql: string; test?: boolean }[] {
+  const m = /^stg_(.+)$/i.exec(stagingModel);
+  if (!m) {
+    return [];
+  }
+  const dim = `${rules.historyPrefix}${m[1]}`;
+  return SCD2_STAGES.map(s => ({ name: `${dim}__${s.suffix}`, macro: s.macro, sql: `{{ ${s.macro}(${lit(dim)}) }}\n`, ...(s.test ? { test: true } : {}) }));
 }
 
 /** Columns the staging template adds that aren't data: the key copy and its dedupe row number. */

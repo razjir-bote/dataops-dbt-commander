@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { HASH_COLUMNS_MACRO, SCD2_DEFAULTS, changeKeyNames, changeKeySql } from '../scd2';
+import { HASH_COLUMNS_MACRO, SCD2_DEFAULTS, changeKeyNames, changeKeySql, scd2GeneratedModels } from '../scd2';
 
 test('changeKeyNames from the staging model name', () => {
   assert.deepEqual(changeKeyNames('stg_ace__aus_accounttag', SCD2_DEFAULTS), {
@@ -98,4 +98,18 @@ test('hash_columns macro: per-column hashes, groups of 250, a final hash; never 
 test('changeKeySql: extra non-data columns (the staging key alias setting) are left out of the hash', () => {
   const { sql } = changeKeySql('stg_a__b', ['row_key', 'Name'], SCD2_DEFAULTS, ['row_key']);
   assert.match(sql, /hash_columns\(\['Name'\]\)/);
+});
+
+test('scd2GeneratedModels: candidate / history / published / gates models calling the SCD2 macros', () => {
+  assert.deepEqual(scd2GeneratedModels('stg_ace__aus_accounttag', SCD2_DEFAULTS), [
+    { name: 'dim_ace__aus_accounttag__candidate', macro: 'scd2_candidate', sql: "{{ scd2_candidate('dim_ace__aus_accounttag') }}\n" },
+    { name: 'dim_ace__aus_accounttag__history', macro: 'scd2_history', sql: "{{ scd2_history('dim_ace__aus_accounttag') }}\n" },
+    { name: 'dim_ace__aus_accounttag__published', macro: 'scd2_published', sql: "{{ scd2_published('dim_ace__aus_accounttag') }}\n" },
+    { name: 'dim_ace__aus_accounttag__gates', macro: 'scd2_gate_test', sql: "{{ scd2_gate_test('dim_ace__aus_accounttag') }}\n", test: true }
+  ]);
+  assert.equal(SCD2_DEFAULTS.generatedFolder, 'models/intermediate/scd2/generated');
+  assert.equal(SCD2_DEFAULTS.testsFolder, 'tests/scd2/generated', 'the gates test is a singular test, under tests/');
+  assert.deepEqual(scd2GeneratedModels('orders', SCD2_DEFAULTS), [], 'not a staging model');
+  // The history model is the table the change-key model checks.
+  assert.equal(scd2GeneratedModels('stg_a__b', SCD2_DEFAULTS)[1].name, changeKeyNames('stg_a__b', SCD2_DEFAULTS)!.history);
 });

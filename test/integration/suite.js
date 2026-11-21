@@ -1257,6 +1257,13 @@ exports.run = async () => {
   await step('SCD2 change-key model from a staging model: template, hash_columns macro, compiles with dbt', async () => {
     const rel = 'models/intermediate/changekey/int_a_changekey.sql';
     const macro = file('macros', 'hash_columns.sql');
+    // Stand-ins for the project's own SCD2 macros, so the generated models compile.
+    const scd2Macros = file('macros', 'zz_scd2.sql');
+    fs.writeFileSync(
+      scd2Macros,
+      ['candidate', 'history', 'published'].map(s => `{% macro scd2_${s}(dim) %}select '{{ dim }}' as dim, '${s}' as stage{% endmacro %}`).join('\n') +
+        "\n{% macro scd2_gate_test(dim) %}select '{{ dim }}' as failing where 1 = 0{% endmacro %}\n"
+    );
     try {
       // stg_a (select 1 as id) has neither versionnumber nor _full_row_hash: the hash_columns macro is used.
       const created = await api.projectEdits.createChangeKey(uri('models', 'staging', 'stg_a.sql'), rel);
@@ -1271,12 +1278,32 @@ exports.run = async () => {
       const compiled = fs.readFileSync(file('target', 'compiled', 'demo', ...rel.split('/')), 'utf8');
       assert.match(compiled, /HASHBYTES\('SHA2_256', CAST\(\[id\] AS NVARCHAR\(4000\)\)\)/);
       assert.match(compiled, /SELECT CAST\(NULL AS DATETIME2\) AS valid_from/, 'no history table yet: the empty branch');
+      // The rest of the SCD2 chain, in the generated folder, calling the project's macros.
+      for (const stage of ['candidate', 'history', 'published']) {
+        const g = file('models', 'intermediate', 'scd2', 'generated', `dim_a__${stage}.sql`);
+        assert.equal(fs.readFileSync(g, 'utf8').replace(/\r\n/g, '\n'), `{{ scd2_${stage}('dim_a') }}\n`);
+      }
+      await vscode.commands.executeCommand('dbtCommander.compile', uri('models', 'intermediate', 'scd2', 'generated', 'dim_a__published.sql'));
+      const pub = fs.readFileSync(file('target', 'compiled', 'demo', 'models', 'intermediate', 'scd2', 'generated', 'dim_a__published.sql'), 'utf8');
+      assert.match(pub, /select 'dim_a' as dim, 'published' as stage/);
+      // The gates test: a singular test under tests/, which dbt runs.
+      const gates = file('tests', 'scd2', 'generated', 'dim_a__gates.sql');
+      assert.equal(fs.readFileSync(gates, 'utf8').replace(/\r\n/g, '\n'), "{{ scd2_gate_test('dim_a') }}\n");
+      const dbtExe = path.join(cfg().get('venvPath'), process.platform === 'win32' ? 'Scripts' : 'bin', process.platform === 'win32' ? 'dbt.exe' : 'dbt');
+      const ran = execFileSync(dbtExe, ['test', '--select', 'dim_a__gates'], { cwd: root, env: { ...process.env, PYTHONIOENCODING: 'utf-8' } }).toString();
+      assert.match(ran, /PASS=1/, ran.slice(-600));
+      // Again: the existing generated models are kept (not overwritten).
+      fs.writeFileSync(file('models', 'intermediate', 'scd2', 'generated', 'dim_a__history.sql'), '-- edited\n');
+      await api.projectEdits.createChangeKey(uri('models', 'staging', 'stg_a.sql'), 'models/intermediate/changekey/int_a_changekey_2.sql');
+      assert.equal(fs.readFileSync(file('models', 'intermediate', 'scd2', 'generated', 'dim_a__history.sql'), 'utf8'), '-- edited\n');
       // Not for a model that isn't a staging model.
       assert.equal(await api.projectEdits.createChangeKey(uri('models', 'b.sql'), 'models/intermediate/changekey/x.sql'), undefined);
     } finally {
       await closeAll();
       fs.rmSync(file('models', 'intermediate'), { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
       fs.rmSync(macro, { force: true });
+      fs.rmSync(scd2Macros, { force: true });
+      fs.rmSync(file('tests', 'scd2'), { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     }
   });
 

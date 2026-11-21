@@ -257,7 +257,7 @@
       },
       {
         "command": "dbtCommander.createChangeKey",
-        "title": "dbt Create SCD2 change-key model…",
+        "title": "dbt Create SCD2 models and gates test…",
         "category": "dbt Commander"
       },
       {
@@ -905,6 +905,16 @@
           "type": "string",
           "default": "_landing_extract_date",
           "description": "SCD2 change-key model: the staging model's extract date, matched against the history table's valid_from."
+        },
+        "dbtCommander.scd2.generatedFolder": {
+          "type": "string",
+          "default": "models/intermediate/scd2/generated",
+          "description": "SCD2: folder for the dim_<source>__<entity>__candidate / __history / __published models created with the change-key model (relative to the project)."
+        },
+        "dbtCommander.scd2.testsFolder": {
+          "type": "string",
+          "default": "tests/scd2/generated",
+          "description": "SCD2: folder for the dim_<source>__<entity>__gates singular test (calls scd2_gate_test), relative to the project."
         }
       }
     },

@@ -83,7 +83,11 @@ Supports dbt-core 1.x (tested with 1.12); not dbt 2 / Fusion.
   source (default `bronze`) in `models/staging/<source>/_<source>__sources.yml`, pointing at the seeds' tables
   (schema from the manifest), with the CSV header as columns — so `source('bronze', '<seed>')` and *Create
   staging model* work on sample data. Existing entries are left alone; run *dbt seed* to load the tables.
-- **dbt Create SCD2 change-key model…** (right-click a `stg_` model in the Explorer, sidebar or editor) — creates
+- **dbt Create SCD2 models…** (right-click a `stg_` model in the Explorer, sidebar or editor) — creates the rest of
+  the chain in `models/intermediate/scd2/generated/` (`dim_<source>__<entity>__candidate` / `__history` /
+  `__published`, each one line calling your project's `scd2_candidate` / `scd2_history` / `scd2_published` macro),
+  the singular test `tests/scd2/generated/dim_<source>__<entity>__gates.sql` (calling `scd2_gate_test`) — existing
+  files are kept, and a missing macro is reported — and
   `models/intermediate/changekey/int_<source>__<entity>_changekey.sql`: only extracts the history table
   (`int_history.dim_<source>__<entity>__history`) hasn't loaded yet, with `attribute_hash` = `versionnumber`, else
   `_full_row_hash`, else `{{ hash_columns([...]) }}` over the data columns. `hash_columns` is added to

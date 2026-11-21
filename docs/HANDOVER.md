@@ -18,7 +18,11 @@ is `dbtCommander.*`; `migrate.ts` copies old `dbtRunner.*` user and workspace se
   (command `dbtCommander.addSeedAsSource`, Explorer seed CSVs + sidebar seeds); pure `csvHeader` / `addSourceTable`
   in `yamlgen.ts` (text insertion, existing lines untouched; flow / empty lists rewritten by the YAML library like
   `appendModel`). Seed schema / database from the manifest (`NodeEntry.schema`, `.database` only when configured);
-  parses first if a seed is missing; last source name remembered in workspace state. Also: *Create staging model*
+  parses first if a seed is missing; last source name remembered in workspace state. Also: the SCD2 command now
+  also writes `dim_<source>__<entity>__candidate` / `__history` / `__published` (one-line calls to the project's
+  `scd2_*` macros, which the extension never creates) to `dbtCommander.scd2.generatedFolder`, and the singular test
+  `dim_<source>__<entity>__gates` (`scd2_gate_test`) to `dbtCommander.scd2.testsFolder` (`tests/scd2/generated`)
+  (`scd2GeneratedModels` in `scd2.ts`, `test: true` for the gates file); existing files kept, missing macros reported. And: *Create staging model*
   from a sources YAML entry (`sourceTableAt` in `yamlcontext.ts`; editor right-click in YAML + a lightbulb on the
   table's own lines).
   Design: `docs/superpowers/specs/2026-11-21-dbt-commander-v0.15-seed-as-source-design.md`.

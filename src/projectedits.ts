@@ -5,7 +5,7 @@ import { LanguageDeps, inProjectPaths, loadManifest } from './language';
 import { TextEdit, isValidModelName, renameRefEdits, renameYamlEdits, takenModelNames } from './refactor';
 import { debugArgs, debugSummary, docsFragment, docsRedirectHtml, newModelSql, stagingName } from './scaffold';
 import { BRONZE_DEFAULTS, BronzeRules, bronzeStaging } from './bronze';
-import { HASH_COLUMNS_MACRO, SCD2_DEFAULTS, Scd2Rules, changeKeyNames, changeKeySql } from './scd2';
+import { HASH_COLUMNS_MACRO, SCD2_DEFAULTS, Scd2Rules, changeKeyNames, changeKeySql, scd2GeneratedModels } from './scd2';
 
 /** The SCD2 rules from settings (`dbtCommander.scd2.*`), defaults for anything unset. */
 function scd2Rules(): Scd2Rules {
@@ -15,7 +15,9 @@ function scd2Rules(): Scd2Rules {
     historyPrefix: c.get<string>('historyPrefix', SCD2_DEFAULTS.historyPrefix),
     changeKeyFolder: (c.get<string>('changeKeyFolder', SCD2_DEFAULTS.changeKeyFolder) || SCD2_DEFAULTS.changeKeyFolder).replace(/\\/g, '/').replace(/\/+$/, ''),
     hashColumns: c.get<string[]>('hashColumns', SCD2_DEFAULTS.hashColumns),
-    extractDateColumn: c.get<string>('extractDateColumn', SCD2_DEFAULTS.extractDateColumn) || SCD2_DEFAULTS.extractDateColumn
+    extractDateColumn: c.get<string>('extractDateColumn', SCD2_DEFAULTS.extractDateColumn) || SCD2_DEFAULTS.extractDateColumn,
+    generatedFolder: (c.get<string>('generatedFolder', SCD2_DEFAULTS.generatedFolder) || SCD2_DEFAULTS.generatedFolder).replace(/\\/g, '/').replace(/\/+$/, ''),
+    testsFolder: (c.get<string>('testsFolder', SCD2_DEFAULTS.testsFolder) || SCD2_DEFAULTS.testsFolder).replace(/\\/g, '/').replace(/\/+$/, '')
   };
 }
 
@@ -330,10 +332,30 @@ export async function createChangeKeyModel(deps: EditDeps, target?: unknown, rel
       edit.insert(vscode.Uri.file(macroFile), new vscode.Position(0, 0), HASH_COLUMNS_MACRO);
     }
   }
+  // The rest of the SCD2 chain: candidate / history / published, each calling the project's scd2_* macro.
+  // Existing files are kept as they are.
+  const generated: string[] = [];
+  const skipped: string[] = [];
+  for (const g of scd2GeneratedModels(staging, rules)) {
+    const f = path.join(root, ...(g.test ? rules.testsFolder : rules.generatedFolder).split('/'), `${g.name}.sql`);
+    if (exists(f)) {
+      skipped.push(g.name);
+      continue;
+    }
+    edit.createFile(vscode.Uri.file(f), { ignoreIfExists: false });
+    edit.insert(vscode.Uri.file(f), new vscode.Position(0, 0), g.sql);
+    generated.push(f);
+  }
+  const missingMacros: string[] = [];
+  for (const g of scd2GeneratedModels(staging, rules)) {
+    if (!index?.macros.some(m => m.name === g.macro) && !(await definesMacro(deps, root, g.macro))) {
+      missingMacros.push(g.macro);
+    }
+  }
   if (!(await vscode.workspace.applyEdit(edit))) {
     return undefined;
   }
-  for (const f of [target2, macroFile]) {
+  for (const f of [target2, macroFile, ...generated]) {
     if (f) {
       await (await vscode.workspace.openTextDocument(vscode.Uri.file(f))).save();
     }
@@ -343,6 +365,9 @@ export async function createChangeKeyModel(deps: EditDeps, target?: unknown, rel
   }
   await vscode.window.showTextDocument(vscode.Uri.file(target2), { preview: false });
   const notes = [
+    generated.length ? `${generated.length} SCD2 file${generated.length === 1 ? '' : 's'} (models in ${rules.generatedFolder}, the gates test in ${rules.testsFolder})` : '',
+    skipped.length ? `kept existing ${skipped.join(', ')}` : '',
+    missingMacros.length ? `no ${missingMacros.join(' / ')} macro in the project yet — those models won't compile until it exists` : '',
     macroFile ? `added the hash_columns macro (${path.relative(root, macroFile).split(path.sep).join('/')})` : '',
     columns.length ? '' : "the staging model's columns couldn't be read (build it first) — fill in attribute_hash",
     fromYaml && columns.length ? "columns taken from the staging model's YAML (it isn't built) — check attribute_hash" : ''
