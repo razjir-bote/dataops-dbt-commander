@@ -87,8 +87,9 @@ Supports dbt-core 1.x (tested with 1.12); not dbt 2 / Fusion.
   the chain in `models/intermediate/scd2/generated/` (`dim_<source>__<entity>__candidate` / `__history` /
   `__published`, each one line calling your project's `scd2_candidate` / `scd2_history` / `scd2_published` macro),
   the singular test `tests/scd2/generated/dim_<source>__<entity>__gates.sql` (calling `scd2_gate_test`) — existing
-  files are kept, and a missing macro is reported — and
-  `models/intermediate/changekey/int_<source>__<entity>_changekey.sql`: only extracts the history table
+  files are kept, and a missing macro is reported — the dimension's entry in the `scd2_dimensions:` list of
+  `vars.yaml` (`dbtCommander.scd2.varsFile`; appended as text, other lines untouched, an existing entry of that name
+  kept) — and `models/intermediate/changekey/int_<source>__<entity>__changekey.sql`: only extracts the history table
   (`int_history.dim_<source>__<entity>__history`) hasn't loaded yet, with `attribute_hash` = `versionnumber`, else
   `_full_row_hash`, else `{{ hash_columns([...]) }}` over the data columns. `hash_columns` is added to
   `macros/hash_columns.sql` when needed (never overwritten): it hashes each column, then groups of 250 column

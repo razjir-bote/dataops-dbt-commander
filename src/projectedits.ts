@@ -5,7 +5,7 @@ import { LanguageDeps, inProjectPaths, loadManifest } from './language';
 import { TextEdit, isValidModelName, renameRefEdits, renameYamlEdits, takenModelNames } from './refactor';
 import { debugArgs, debugSummary, docsFragment, docsRedirectHtml, newModelSql, stagingName } from './scaffold';
 import { BRONZE_DEFAULTS, BronzeRules, bronzeStaging } from './bronze';
-import { HASH_COLUMNS_MACRO, SCD2_DEFAULTS, Scd2Rules, changeKeyNames, changeKeySql, scd2GeneratedModels } from './scd2';
+import { HASH_COLUMNS_MACRO, SCD2_DEFAULTS, Scd2Rules, addScd2Dimension, changeKeyNames, changeKeySql, scd2Dimension, scd2GeneratedModels } from './scd2';
 
 /** The SCD2 rules from settings (`dbtCommander.scd2.*`), defaults for anything unset. */
 function scd2Rules(): Scd2Rules {
@@ -17,7 +17,8 @@ function scd2Rules(): Scd2Rules {
     hashColumns: c.get<string[]>('hashColumns', SCD2_DEFAULTS.hashColumns),
     extractDateColumn: c.get<string>('extractDateColumn', SCD2_DEFAULTS.extractDateColumn) || SCD2_DEFAULTS.extractDateColumn,
     generatedFolder: (c.get<string>('generatedFolder', SCD2_DEFAULTS.generatedFolder) || SCD2_DEFAULTS.generatedFolder).replace(/\\/g, '/').replace(/\/+$/, ''),
-    testsFolder: (c.get<string>('testsFolder', SCD2_DEFAULTS.testsFolder) || SCD2_DEFAULTS.testsFolder).replace(/\\/g, '/').replace(/\/+$/, '')
+    testsFolder: (c.get<string>('testsFolder', SCD2_DEFAULTS.testsFolder) || SCD2_DEFAULTS.testsFolder).replace(/\\/g, '/').replace(/\/+$/, ''),
+    varsFile: (c.get<string>('varsFile', SCD2_DEFAULTS.varsFile) || SCD2_DEFAULTS.varsFile).replace(/\\/g, '/')
   };
 }
 
@@ -271,8 +272,9 @@ async function definesMacro(deps: EditDeps, root: string, name: string): Promise
 }
 
 /**
- * Create `int_<source>__<entity>_changekey.sql` from a staging model (`stg_<source>__<entity>`) in the team's SCD2
- * template, plus its YAML entry — and `macros/hash_columns.sql` when the hash needs it and the project lacks it.
+ * Create `int_<source>__<entity>__changekey.sql` from a staging model (`stg_<source>__<entity>`) in the team's SCD2
+ * template, plus its YAML entry — and `macros/hash_columns.sql` when the hash needs it and the project lacks it —
+ * then the generated SCD2 models, the gates test and the dimension's entry in the vars file's `scd2_dimensions:`.
  */
 export async function createChangeKeyModel(deps: EditDeps, target?: unknown, relPathArg?: string): Promise<string | undefined> {
   const uri = deps.asUri(target) ?? vscode.window.activeTextEditor?.document.uri;
@@ -352,10 +354,53 @@ export async function createChangeKeyModel(deps: EditDeps, target?: unknown, rel
       missingMacros.push(g.macro);
     }
   }
+  // The dimension's entry in the vars file (scd2_dimensions:), fed by the change-key model as named above.
+  // Read through the editor, so unsaved changes in an open vars file are kept (and that file is then left unsaved).
+  const varsPath = path.resolve(root, rules.varsFile);
+  const varsShown = path.relative(root, varsPath).split(path.sep).join('/');
+  const varsUri = vscode.Uri.file(varsPath);
+  const samePath = (a: string, b: string) => (process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b);
+  let varsDoc = vscode.workspace.textDocuments.find(d => d.uri.scheme === 'file' && samePath(d.uri.fsPath, varsPath));
+  let varsNote = '';
+  let saveVars = false;
+  try {
+    if (!varsDoc && exists(varsPath)) {
+      varsDoc = await vscode.workspace.openTextDocument(varsUri);
+    }
+    const before = varsDoc?.getText() ?? '';
+    const vars = addScd2Dimension(before, scd2Dimension(names.dim, model, keyAlias || BRONZE_DEFAULTS.keyAlias, rules));
+    if (vars.status === 'added') {
+      if (varsDoc) {
+        // Only the inserted lines change: the common start and end are left as they are (undo, cursor).
+        let a = 0;
+        while (a < before.length && before[a] === vars.text[a]) {
+          a++;
+        }
+        let b = 0;
+        while (b < before.length - a && before[before.length - 1 - b] === vars.text[vars.text.length - 1 - b]) {
+          b++;
+        }
+        edit.replace(varsUri, new vscode.Range(varsDoc.positionAt(a), varsDoc.positionAt(before.length - b)), vars.text.slice(a, vars.text.length - b));
+        saveVars = !varsDoc.isDirty;
+      } else {
+        edit.createFile(varsUri, { ignoreIfExists: false });
+        edit.insert(varsUri, new vscode.Position(0, 0), vars.text);
+        saveVars = true;
+      }
+      varsNote = `added ${names.dim} to scd2_dimensions in ${varsShown}${saveVars ? '' : ' (unsaved: it had other changes)'}`;
+    } else if (vars.status === 'exists') {
+      varsNote = `${names.dim} is already in ${varsShown} (kept)`;
+    } else {
+      varsNote = `didn't add ${names.dim} to ${varsShown}: ${vars.reason} — add it by hand`;
+    }
+  } catch (e) {
+    varsNote = `couldn't read ${varsShown} (${e instanceof Error ? e.message : String(e)}) — add ${names.dim} to scd2_dimensions by hand`;
+  }
   if (!(await vscode.workspace.applyEdit(edit))) {
+    void vscode.window.showErrorMessage(`dbt Commander: couldn't create the SCD2 files for ${staging}.`);
     return undefined;
   }
-  for (const f of [target2, macroFile, ...generated]) {
+  for (const f of [target2, macroFile, ...generated, saveVars ? varsPath : undefined]) {
     if (f) {
       await (await vscode.workspace.openTextDocument(vscode.Uri.file(f))).save();
     }
@@ -367,6 +412,7 @@ export async function createChangeKeyModel(deps: EditDeps, target?: unknown, rel
   const notes = [
     generated.length ? `${generated.length} SCD2 file${generated.length === 1 ? '' : 's'} (models in ${rules.generatedFolder}, the gates test in ${rules.testsFolder})` : '',
     skipped.length ? `kept existing ${skipped.join(', ')}` : '',
+    varsNote,
     missingMacros.length ? `no ${missingMacros.join(' / ')} macro in the project yet — those models won't compile until it exists` : '',
     macroFile ? `added the hash_columns macro (${path.relative(root, macroFile).split(path.sep).join('/')})` : '',
     columns.length ? '' : "the staging model's columns couldn't be read (build it first) — fill in attribute_hash",

@@ -24,7 +24,14 @@ is `dbtCommander.*`; `migrate.ts` copies old `dbtRunner.*` user and workspace se
   `dim_<source>__<entity>__gates` (`scd2_gate_test`) to `dbtCommander.scd2.testsFolder` (`tests/scd2/generated`)
   (`scd2GeneratedModels` in `scd2.ts`, `test: true` for the gates file); existing files kept, missing macros reported. And: *Create staging model*
   from a sources YAML entry (`sourceTableAt` in `yamlcontext.ts`; editor right-click in YAML + a lightbulb on the
-  table's own lines).
+  table's own lines). And: the SCD2 command adds the dimension to `scd2_dimensions:` in `vars.yaml`
+  (`dbtCommander.scd2.varsFile`, project-relative; `addScd2Dimension` / `scd2DimensionLines` in `scd2.ts`): text
+  insertion after the list's last item at its indentation (blank-line style kept, BOM / CRLF kept), section appended
+  when missing, file created when missing; an entry whose own `name:` matches → `exists`; a flow list, an anchor, a
+  mapping, tabs or a second `scd2_dimensions` key → `unsupported` (untouched, reported). An open vars file is edited
+  in place (only the inserted range) and saved only if it had no other unsaved changes. The entry's `source` /
+  `baseline_source` is the change-key model as named in the prompt. **Breaking rename:** the change-key model is now
+  `int_<source>__<entity>__changekey` (two underscores, user decision); existing files aren't renamed.
   Design: `docs/superpowers/specs/2026-11-21-dbt-commander-v0.15-seed-as-source-design.md`.
 - **v0.14.0 — released** (https://github.com/razjir-bote/dataops-dbt-commander/releases/tag/v0.14.0) — **SCD2 change-key model.** `scd2.ts` (pure: `changeKeyNames`, `changeKeySql`,
   `HASH_COLUMNS_MACRO`) + `createChangeKeyModel` in `projectedits.ts` (command `dbtCommander.createChangeKey`,

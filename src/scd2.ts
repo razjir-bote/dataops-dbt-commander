@@ -18,6 +18,8 @@ export interface Scd2Rules {
   generatedFolder: string;
   /** Where the gates test goes (a singular test, so under the project's test paths). */
   testsFolder: string;
+  /** The vars file (relative to the project) whose `scd2_dimensions:` list gets each dimension. */
+  varsFile: string;
 }
 
 export const SCD2_DEFAULTS: Scd2Rules = {
@@ -27,16 +29,20 @@ export const SCD2_DEFAULTS: Scd2Rules = {
   hashColumns: ['versionnumber', '_full_row_hash'],
   extractDateColumn: '_landing_extract_date',
   generatedFolder: 'models/intermediate/scd2/generated',
-  testsFolder: 'tests/scd2/generated'
+  testsFolder: 'tests/scd2/generated',
+  varsFile: 'vars.yaml'
 };
 
 const bracket = (name: string) => `[${name.replace(/]/g, ']]')}]`;
 const lit = (s: string) => `'${s.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
 
-/** `stg_<source>__<entity>` → the change-key model and history table names; undefined for a non-staging name. */
-export function changeKeyNames(stagingModel: string, rules: Scd2Rules): { model: string; history: string } | undefined {
+/**
+ * `stg_<source>__<entity>` → the change-key model (`int_<source>__<entity>__changekey`), the dimension
+ * (`dim_<source>__<entity>`) and its history table; undefined for a non-staging name.
+ */
+export function changeKeyNames(stagingModel: string, rules: Scd2Rules): { model: string; dim: string; history: string } | undefined {
   const m = /^stg_(.+)$/i.exec(stagingModel);
-  return m ? { model: `int_${m[1]}_changekey`, history: `${rules.historyPrefix}${m[1]}__history` } : undefined;
+  return m ? { model: `int_${m[1]}__changekey`, dim: `${rules.historyPrefix}${m[1]}`, history: `${rules.historyPrefix}${m[1]}__history` } : undefined;
 }
 
 /** The SCD2 files after the change-key model, each a call to one of the project's macros. `test`: a singular test. */
@@ -61,6 +67,137 @@ export function scd2GeneratedModels(stagingModel: string, rules: Scd2Rules): { n
   return SCD2_STAGES.map(s => ({ name: `${dim}__${s.suffix}`, macro: s.macro, sql: `{{ ${s.macro}(${lit(dim)}) }}\n`, ...(s.test ? { test: true } : {}) }));
 }
 
+// ---------- the scd2_dimensions entry in vars.yaml ----------
+
+export interface Scd2Dimension {
+  name: string;
+  source: string;
+  naturalKey: string;
+  changeDateColumn: string;
+}
+
+/** The dimension `name`, fed by the change-key model `source`, keyed on `naturalKey`. */
+export function scd2Dimension(name: string, source: string, naturalKey: string, rules: Scd2Rules): Scd2Dimension {
+  return { name, source, naturalKey, changeDateColumn: rules.extractDateColumn };
+}
+
+/** The team's `scd2_dimensions` entry, as lines starting at column 0 (`- name: …` then its keys). */
+export function scd2DimensionLines(d: Scd2Dimension): string[] {
+  const v = yamlScalar;
+  return [
+    `- name: ${v(d.name)}`,
+    `  source: ${v(d.source)}`,
+    `  natural_key: [${v(d.naturalKey)}]`,
+    `  change_date_column: ${v(d.changeDateColumn)}`,
+    '  hash_column: attribute_hash',
+    '  load_mode: delta',
+    '  dedupe_order_by: attribute_hash',
+    `  baseline_source: ${v(d.source)}`,
+    '  source_cadence_days: 1',
+    '  source_lag_grace_days: 500',
+    '  # max_rows_per_batch: 50000',
+    '  # allow_full_refresh: false'
+  ];
+}
+
+/** A plain YAML scalar as is; anything else (spaces, `:`, `#`, quotes …) single-quoted. */
+const yamlScalar = (s: string) => (/^[A-Za-z_][A-Za-z0-9_.\-]*$/.test(s) ? s : `'${s.replace(/'/g, "''")}'`);
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const indentOf = (line: string) => /^ */.exec(line)![0].length;
+
+export type Scd2DimensionResult =
+  | { status: 'added'; text: string }
+  | { status: 'exists'; text: string }
+  /** Left alone: the section isn't a block list this can append to as text. */
+  | { status: 'unsupported'; text: string; reason: string };
+
+/**
+ * Add the dimension to the `scd2_dimensions:` list of a vars file's text, as text: the entry goes after the
+ * list's last line, at its items' indentation; nothing else changes. No section: one is appended. An entry with
+ * that name already in the list: `exists`, text unchanged. A section that isn't an (empty or) block list — a flow
+ * list, an anchor, a second `scd2_dimensions` key, tab indentation: `unsupported`, text unchanged.
+ */
+export function addScd2Dimension(text: string, d: Scd2Dimension): Scd2DimensionResult {
+  const bom = text.charCodeAt(0) === 0xfeff ? text[0] : '';
+  const eol = text.includes('\r\n') ? '\r\n' : '\n';
+  const lines = text.slice(bom.length).split(/\r?\n/);
+  if (lines.length && lines[lines.length - 1] === '') {
+    lines.pop();
+  }
+  const done = (out: string[]) => ({ text: bom + out.join(eol) + eol, status: 'added' as const });
+  const unsupported = (reason: string) => ({ text, status: 'unsupported' as const, reason });
+  const entry = scd2DimensionLines(d);
+  const keyRe = /^ *(['"]?)scd2_dimensions\1 *:(?: +(.*?))? *$/;
+  const keys = lines.map((l, i) => (keyRe.test(l) ? i : -1)).filter(i => i >= 0);
+  if (!keys.length) {
+    return done([...lines, ...(lines.some(l => l.trim()) ? [''] : []), 'scd2_dimensions:', ...entry.map(l => '  ' + l)]);
+  }
+  if (keys.length > 1) {
+    return unsupported('scd2_dimensions appears more than once');
+  }
+  const at = keys[0];
+  const value = (keyRe.exec(lines[at])![2] ?? '').replace(/(^| )#.*$/, '').trim();
+  if (value && !/^(\[ *\]|null|~)$/i.test(value)) {
+    return unsupported(`scd2_dimensions is written as \`${value}\`, not a block list`);
+  }
+  const keyIndent = indentOf(lines[at]);
+  // The section: until a line that's back at (or left of) the key, other than a list item at the key's indent.
+  let end = at + 1;
+  let last = at; // the last line that belongs to the list
+  let itemIndent: number | undefined;
+  let blankBetweenItems = false;
+  let itemKeyIndent = -1; // where the current item's own keys start (`- name:` → after the dash)
+  let exists = false;
+  const nameRe = new RegExp(`^(['"]?)name\\1 *: *(['"]?)${escapeRe(d.name)}\\2 *(#.*)?$`);
+  for (; end < lines.length; end++) {
+    const l = lines[end];
+    if (!l.trim()) {
+      continue;
+    }
+    if (/^ *\t/.test(l)) {
+      return unsupported('the scd2_dimensions list is indented with tabs');
+    }
+    const n = indentOf(l);
+    const dash = /^ *- +/.exec(l);
+    const item = !!dash || /^ *-$/.test(l);
+    if (n < keyIndent || (n === keyIndent && !item)) {
+      if (l.trim().startsWith('#')) {
+        continue; // a comment at the key's level: may be the next key's, never the list's
+      }
+      break;
+    }
+    if (itemIndent === undefined && !item && !l.trim().startsWith('#')) {
+      return unsupported('scd2_dimensions holds something other than a block list');
+    }
+    // An entry of that name: `name:` as one of an item's own keys (not a nested mapping's).
+    if (item && (itemIndent === undefined || n === itemIndent)) {
+      itemKeyIndent = dash ? dash[0].length : -1;
+      exists ||= nameRe.test(l.slice(dash ? dash[0].length : n));
+    } else if (n === itemKeyIndent) {
+      exists ||= nameRe.test(l.slice(n));
+    }
+    if (item && itemIndent === undefined) {
+      itemIndent = n;
+    } else if (item && n === itemIndent && !lines[end - 1].trim()) {
+      blankBetweenItems = true;
+    }
+    last = end;
+  }
+  if (exists) {
+    return { text, status: 'exists' };
+  }
+  const pad = ' '.repeat(itemIndent ?? keyIndent + 2);
+  const head = lines[at].replace(/^( *(['"]?)scd2_dimensions\2 *:) *(\[ *\]|null|~)/i, '$1');
+  return done([
+    ...lines.slice(0, at),
+    head,
+    ...lines.slice(at + 1, last + 1),
+    ...(blankBetweenItems ? [''] : []),
+    ...entry.map(l => pad + l),
+    ...lines.slice(last + 1)
+  ]);
+}
+
 /** Columns the staging template adds that aren't data: the key copy and its dedupe row number. */
 const NOT_DATA = new Set(['entity_id', 'rn']);
 
@@ -76,7 +213,7 @@ export function changeKeySql(
   notData: string[] = []
 ): { sql: string; usesMacro: boolean } {
   const skip = new Set([...NOT_DATA, ...notData.map(n => n.toLowerCase())]);
-  const names = changeKeyNames(stagingModel, rules) ?? { model: `int_${stagingModel}_changekey`, history: `${rules.historyPrefix}${stagingModel}__history` };
+  const names = changeKeyNames(stagingModel, rules) ?? { model: `int_${stagingModel}__changekey`, dim: `${rules.historyPrefix}${stagingModel}`, history: `${rules.historyPrefix}${stagingModel}__history` };
   const has = (name: string) => columns.find(c => c.toLowerCase() === name.toLowerCase());
   const direct = rules.hashColumns.map(has).find((c): c is string => !!c);
   const data = columns.filter(c => !c.startsWith('_') && !skip.has(c.toLowerCase()));

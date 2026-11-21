@@ -1255,7 +1255,9 @@ exports.run = async () => {
   await section('v14');
 
   await step('SCD2 change-key model from a staging model: template, hash_columns macro, compiles with dbt', async () => {
-    const rel = 'models/intermediate/changekey/int_a_changekey.sql';
+    const rel = 'models/intermediate/changekey/int_a__changekey.sql';
+    const varsFile = file('vars.yaml');
+    fs.writeFileSync(varsFile, 'other_var: 1  # kept\nscd2_dimensions:\n  - name: dim_existing\n    source: int_existing__changekey\n');
     const macro = file('macros', 'hash_columns.sql');
     // Stand-ins for the project's own SCD2 macros, so the generated models compile.
     const scd2Macros = file('macros', 'zz_scd2.sql');
@@ -1292,9 +1294,15 @@ exports.run = async () => {
       const dbtExe = path.join(cfg().get('venvPath'), process.platform === 'win32' ? 'Scripts' : 'bin', process.platform === 'win32' ? 'dbt.exe' : 'dbt');
       const ran = execFileSync(dbtExe, ['test', '--select', 'dim_a__gates'], { cwd: root, env: { ...process.env, PYTHONIOENCODING: 'utf-8' } }).toString();
       assert.match(ran, /PASS=1/, ran.slice(-600));
+      // The dimension's entry, appended to scd2_dimensions in vars.yaml (the rest of the file untouched).
+      const vars = fs.readFileSync(varsFile, 'utf8').replace(/\r\n/g, '\n');
+      assert.ok(vars.startsWith('other_var: 1  # kept\nscd2_dimensions:\n  - name: dim_existing\n    source: int_existing__changekey\n  - name: dim_a\n    source: int_a__changekey\n'), vars);
+      assert.match(vars, /    natural_key: \[entity_id\]\n    change_date_column: _landing_extract_date\n/);
+      assert.match(vars, /    baseline_source: int_a__changekey\n/);
       // Again: the existing generated models are kept (not overwritten).
       fs.writeFileSync(file('models', 'intermediate', 'scd2', 'generated', 'dim_a__history.sql'), '-- edited\n');
-      await api.projectEdits.createChangeKey(uri('models', 'staging', 'stg_a.sql'), 'models/intermediate/changekey/int_a_changekey_2.sql');
+      await api.projectEdits.createChangeKey(uri('models', 'staging', 'stg_a.sql'), 'models/intermediate/changekey/int_a__changekey_2.sql');
+      assert.equal(fs.readFileSync(varsFile, 'utf8').replace(/\r\n/g, '\n'), vars, 'dim_a already in scd2_dimensions: not added twice');
       assert.equal(fs.readFileSync(file('models', 'intermediate', 'scd2', 'generated', 'dim_a__history.sql'), 'utf8'), '-- edited\n');
       // Not for a model that isn't a staging model.
       assert.equal(await api.projectEdits.createChangeKey(uri('models', 'b.sql'), 'models/intermediate/changekey/x.sql'), undefined);
@@ -1303,6 +1311,7 @@ exports.run = async () => {
       fs.rmSync(file('models', 'intermediate'), { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
       fs.rmSync(macro, { force: true });
       fs.rmSync(scd2Macros, { force: true });
+      fs.rmSync(varsFile, { force: true });
       fs.rmSync(file('tests', 'scd2'), { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     }
   });
