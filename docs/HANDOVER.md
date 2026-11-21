@@ -1,7 +1,7 @@
 # DataOps dbt Commander — developer handover
 
 Keep this file current: update it in the same commit as any change to features, architecture, build/release
-process, or known issues. Last updated: 2026-11-21 (v0.13.0 released: YAML autocomplete).
+process, or known issues. Last updated: 2026-11-21 (v0.14.0 released: bronze staging template, SCD2 change-key model, parallel integration tests).
 
 ## What this is
 A VS Code extension (TypeScript) for working with **dbt-core 1.x** (tested with 1.12.7) on **Windows**, running
@@ -14,6 +14,27 @@ Since v0.9.0 the extension ID is `local.dataops-dbt-commander` and every command
 is `dbtCommander.*`; `migrate.ts` copies old `dbtRunner.*` user and workspace settings once on activation.
 
 ## Status
+- **v0.14.0 — released** (https://github.com/razjir-bote/dataops-dbt-commander/releases/tag/v0.14.0) — **SCD2 change-key model.** `scd2.ts` (pure: `changeKeyNames`, `changeKeySql`,
+  `HASH_COLUMNS_MACRO`) + `createChangeKeyModel` in `projectedits.ts` (command `dbtCommander.createChangeKey`,
+  sidebar staging models have contextValue `model-stg` — sidebar when-clauses on `model` accept it too).
+  `attribute_hash`: first of `scd2.hashColumns` (versionnumber, _full_row_hash) the staging model has, else the
+  `hash_columns` macro over the columns not starting with `_` (minus entity_id / rn / the key alias). The macro is
+  written only if no macro file defines `hash_columns` (scanned, not just the manifest). Columns: the built
+  table first, the staging YAML if not built. Checked by `dbt compile` in the integration suite (600-column
+  grouping checked by hand: 250 / 250 / 100). Review fixes also in `bronze.ts`: warehouse date / datetime
+  columns are cast directly (a text round trip of DATETIME drops seconds); an existing `entity_id` column
+  isn't duplicated. Not done (minor): NULL delete flags are dropped (as the template); `_bronze_run_id` sorts
+  as text in the dedupe; no-key dedupe partitions on every data column (wide on very wide tables).
+  Design: `docs/superpowers/specs/2026-11-21-dbt-commander-v0.14-scd2-changekey-design.md`.
+- **Also in v0.14.0: Create staging model uses the team's bronze template.** `bronze.ts`
+  (pure: `bronzeStaging(source, table, columns, rules)` → SQL + staged YAML columns; `BRONZE_DEFAULTS`); the old
+  plain `stagingSql` was removed (user decision: replace, not add). Rules are `dbtCommander.bronzeStaging.*`
+  settings. Types by column name first, then a warehouse date / datetime type; key kept + copied to `entity_id`;
+  no key → dedupe on every column not starting with `_` per extract date; no order columns → `ORDER BY (SELECT
+  NULL)`. The output is T-SQL: on the DuckDB test fixture it is only checked as text, never run. File name
+  `stg_<system>__<entity>` from the table name split at its first underscore (`stagingName`); no underscore → the
+  dbt source name is the system.
+  Design: `docs/superpowers/specs/2026-11-21-dbt-commander-v0.14-bronze-staging-design.md`.
 - **v0.13.0 — released** (https://github.com/razjir-bote/dataops-dbt-commander/releases/tag/v0.13.0): **YAML autocomplete.** `yamlcontext.ts` (pure: path / kind / siblings /
   item names at the cursor, from indentation, so half-typed YAML works), `yamlcomplete.ts` (pure: what to suggest
   where — keys per place, config values, test snippets honouring `arguments:` by dbt version, materializations from
@@ -106,12 +127,16 @@ npm run compile && npm test  # unit tests (node:test) → out/test/*.test.js
 npm run test:integration     # real VS Code + dbt 1.12 + duckdb, see below
 npm run package              # esbuild → dist/extension.js, then vsce → .vsix (no node_modules shipped)
 ```
-- **Integration suite** (`test/integration/run.js` + `suite.js`): copies `test/fixtures/demo` to
-  `.vscode-test/work/demo`, creates `.vscode-test/dbt-venv` (dbt-core~=1.12.0 + dbt-duckdb) on first run
-  (`DBT_PYTHON` picks the Python; default `py -3.12` on Windows), launches VS Code with the extension and prints
-  `PASS`/`FAIL` lines; exits 1 on any FAIL. ~4–5 min. Currently 69 checks; the v0.10 ones are last because they add a
-  temporary model and feed a fake run_results file to the run-state store (which then is "the last run"). The suite talks to the extension
-  through the API returned by `activate()` (`sidebar`, `tests`, `lineage`, `runStatus`, `projectEdits`, `query`, …).
+- **Integration suite** (`test/integration/run.js` + `suite.js` + `groups.js`): creates `.vscode-test/dbt-venv`
+  (dbt-core~=1.12.0 + dbt-duckdb + sqlfluff) on first run (`DBT_PYTHON` picks the Python; default `py -3.12` on
+  Windows), downloads VS Code once, then runs the suite's **groups in parallel** — one VS Code, one
+  `.vscode-test/user-data-gN` and one copy of `test/fixtures/demo` in `.vscode-test/work/gN/demo` each — and prints
+  every group's `PASS` / `FAIL` lines with per-step times, then a total; exits 1 on any FAIL.
+  `npm run test:integration:serial` (or `--serial`) runs every step in one VS Code, in order, as before.
+  Groups are lists of suite sections (`await section('v08')`) in `groups.js`; every group after the first starts with
+  a setup step (seed, build, docs generate) standing in for what earlier steps left behind. A new step goes in a
+  section; a new section must be added to a group. Rebalance with the step times. Currently 70 checks (+ 3 setup
+  steps in parallel runs). The suite talks to the extension through the API returned by `activate()`.
 - **CI** (`.github/workflows/ci.yml`): windows-latest, Node 22, Python 3.12; typecheck, unit, integration,
   package. A pushed tag `vX.Y.Z` that equals `package.json` version publishes a GitHub release with the vsix.
 - **Release steps:** bump `version` in package.json (+ `npm install` to refresh the lockfile), commit, push
@@ -138,7 +163,7 @@ npm run package              # esbuild → dist/extension.js, then vsce → .vsi
 | `runstatus.ts` / `lastrun.ts` | per-node last result store (watches run_results.json) / Last run view |
 | `columns.ts` | pure: `alias.` completion helpers, `refLines` for references |
 | `projectedits.ts` | rename model, create staging model, new model, open in docs, dbt debug commands |
-| `refactor.ts` / `scaffold.ts` | pure: ref()/YAML rename edits / staging + template SQL, docs routes, debug parsing |
+| `refactor.ts` / `scaffold.ts` | pure: ref()/YAML rename edits / staging names, new-model template SQL, docs routes, debug parsing |
 | `profiles.ts` | pure: profiles.yml targets, project file fields |
 | `show.ts` / `previewPanel.ts` | `dbt show` parsing (big-int safe) / data preview webview |
 | `yamlgen.ts` | pure: YAML generation/merge that inserts text and never restyles existing lines |
@@ -149,6 +174,7 @@ npm run package              # esbuild → dist/extension.js, then vsce → .vsi
 | `query.ts` | `runShow` (shared by Preview Data), scratchpads, preview selection / CTE, YAML quick-fix code actions |
 | `yamlcontext.ts` / `yamlcomplete.ts` / `yamlCompletion.ts` | pure YAML cursor context / pure suggestion rules / YAML completion provider |
 | `sqlfluff.ts` / `sqlfluffRunner.ts` | pure SQLFluff helpers / optional linting, fix on save, formatter, commands |
+| `bronze.ts` / `scd2.ts` | pure: the bronze → staging template / SCD2 change-key template + `hash_columns` macro |
 | `exportrows.ts` / `profile.ts` | pure: preview sort / filter / CSV / TSV / profile query + display rows |
 | `scratch.ts` / `yamlfix.ts` / `macrohover.ts` | pure: CTE parser + inline SQL / column test insertions / macro signature + hover text |
 

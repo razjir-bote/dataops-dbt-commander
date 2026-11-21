@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as path from 'path';
 import { isValidModelName, renameRefEdits, renameYamlEdits, takenModelNames } from '../refactor';
-import { debugArgs, debugSummary, docsFragment, docsRedirectHtml, newModelSql, stagingName, stagingSql } from '../scaffold';
+import { debugArgs, debugSummary, docsFragment, docsRedirectHtml, newModelSql, stagingName } from '../scaffold';
 import { parseManifest } from '../manifest';
 import { appendModel, newModelYaml } from '../yamlgen';
 
@@ -96,11 +96,6 @@ test('docsRedirectHtml escapes the target for the attribute and the script', () 
   assert.match(html, /location\.replace\(/);
 });
 
-test('stagingSql quotes column names that need it, via the adapter', () => {
-  const sql = stagingSql('raw', 'orders', ['id', 'Order Id', 'select']);
-  assert.match(sql, /        id,\n        \{\{ adapter\.quote\('Order Id'\) \}\},\n        \{\{ adapter\.quote\('select'\) \}\}\n/);
-});
-
 test('takenModelNames ignores manifest models whose file is gone (stale manifest right after a rename)', () => {
   const models = [
     { name: 'b', package: 'demo', file: 'C:/p/models/b.sql' }, // renamed away: file no longer exists
@@ -116,19 +111,15 @@ test('isValidModelName', () => {
   assert.ok(!isValidModelName('1abc') && !isValidModelName('has space') && !isValidModelName('a-b') && !isValidModelName(''));
 });
 
-test('stagingName follows stg_<source>__<table>, made safe', () => {
+test('stagingName: stg_<system>__<entity> from the table name, split at its first underscore', () => {
+  assert.equal(stagingName('bronze', 'ace_aus_accounttag_account'), 'stg_ace__aus_accounttag_account');
+  assert.equal(stagingName('bronze', 'crm_contact'), 'stg_crm__contact');
+  // No underscore in the table name: the dbt source name stands in for the system.
   assert.equal(stagingName('raw', 'orders'), 'stg_raw__orders');
-  assert.equal(stagingName('Shop DB', 'Order-Items'), 'stg_shop_db__order_items');
-});
-
-test('stagingSql lists the columns, or falls back to select * with a TODO', () => {
-  const sql = stagingSql('raw', 'orders', ['id', 'amount']);
-  assert.match(sql, /select \* from \{\{ source\('raw', 'orders'\) \}\}/);
-  assert.match(sql, /renamed as \(\n\n    select\n        id,\n        amount\n\n    from source\n\n\)/);
-  assert.match(sql, /select \* from renamed\n$/);
-  const empty = stagingSql('raw', 'orders', []);
-  assert.match(empty, /-- TODO: list the columns/);
-  assert.match(empty, /select \* from source/);
+  // Made safe: lower case, other characters → _.
+  assert.equal(stagingName('Shop DB', 'Shop-X_Order Items'), 'stg_shop_x__order_items');
+  // Leading underscore: nothing before it, so the source name again.
+  assert.equal(stagingName('raw', '_hidden_x'), 'stg_raw__hidden_x');
 });
 
 test('newModelSql: built-in skeleton, or the user template with {{name}} filled in', () => {
@@ -168,4 +159,9 @@ test('parseManifest lists exposures and semantic models, and puts semantic model
   assert.deepEqual(m.exposures.map(e => [e.name, e.file]), [['dash', path.join(root, 'models', 'exposures.yml')]]);
   assert.deepEqual(m.semanticModels.map(e => e.name), ['orders_sm']);
   assert.equal(m.nodes.get('semantic_model.demo.orders_sm')?.type, 'semantic_model');
+});
+
+test('stagingName: a part that is empty once made safe falls back to source + whole table', () => {
+  assert.equal(stagingName('raw', 'a_-'), 'stg_raw__a');
+  assert.equal(stagingName('raw', '-_x'), 'stg_raw__x');
 });

@@ -8,9 +8,16 @@ const slug = (s: string) =>
     .replace(/_+/g, '_')
     .replace(/^_|_$/g, '');
 
-/** dbt Labs' convention: stg_<source>__<table>. */
+/**
+ * `stg_<system>__<entity>` from the table name, split at its first underscore (`ace_aus_accounttag_account` →
+ * `stg_ace__aus_accounttag_account`). A table name with nothing before an underscore uses the dbt source name as
+ * the system and the whole table name as the entity.
+ */
 export function stagingName(source: string, table: string): string {
-  return `stg_${slug(source)}__${slug(table)}`;
+  const at = table.indexOf('_');
+  const [system, entity] = at > 0 ? [slug(table.slice(0, at)), slug(table.slice(at + 1))] : ['', ''];
+  // Either part empty once made safe (`a_-`, `-_x`): the dbt source name and the whole table name.
+  return system && entity ? `stg_${system}__${entity}` : `stg_${slug(source)}__${slug(table)}`;
 }
 
 const RESERVED = new Set([
@@ -29,15 +36,6 @@ const RESERVED = new Set([
 export function columnRef(name: string): string {
   const plain = /^[a-z_][a-z0-9_]*$/.test(name) || /^[A-Z_][A-Z0-9_]*$/.test(name);
   return plain && !RESERVED.has(name.toLowerCase()) ? name : `{{ adapter.quote('${name.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}') }}`;
-}
-
-/** A staging model selecting every column of a source table (or `select *` with a TODO when unknown). */
-export function stagingSql(source: string, table: string, columns: string[]): string {
-  const from = `select * from {{ source('${source.replace(/'/g, "\\'")}', '${table.replace(/'/g, "\\'")}') }}`;
-  const body = columns.length
-    ? ['    select', columns.map(c => `        ${columnRef(c)}`).join(',\n'), '', '    from source']
-    : ['    -- TODO: list the columns (they could not be read from the warehouse)', '    select * from source'];
-  return ['with source as (', '', `    ${from}`, '', '),', '', 'renamed as (', '', ...body, '', ')', '', 'select * from renamed', ''].join('\n');
 }
 
 const DEFAULT_TEMPLATE = ['with source as (', '', "    select * from {{ ref('replace_me') }}", '', ')', '', 'select * from source', ''].join('\n');

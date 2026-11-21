@@ -3,7 +3,38 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { LanguageDeps, inProjectPaths, loadManifest } from './language';
 import { TextEdit, isValidModelName, renameRefEdits, renameYamlEdits, takenModelNames } from './refactor';
-import { debugArgs, debugSummary, docsFragment, docsRedirectHtml, newModelSql, stagingName, stagingSql } from './scaffold';
+import { debugArgs, debugSummary, docsFragment, docsRedirectHtml, newModelSql, stagingName } from './scaffold';
+import { BRONZE_DEFAULTS, BronzeRules, bronzeStaging } from './bronze';
+import { HASH_COLUMNS_MACRO, SCD2_DEFAULTS, Scd2Rules, changeKeyNames, changeKeySql } from './scd2';
+
+/** The SCD2 rules from settings (`dbtCommander.scd2.*`), defaults for anything unset. */
+function scd2Rules(): Scd2Rules {
+  const c = vscode.workspace.getConfiguration('dbtCommander.scd2');
+  return {
+    historySchema: c.get<string>('historySchema', SCD2_DEFAULTS.historySchema) || SCD2_DEFAULTS.historySchema,
+    historyPrefix: c.get<string>('historyPrefix', SCD2_DEFAULTS.historyPrefix),
+    changeKeyFolder: (c.get<string>('changeKeyFolder', SCD2_DEFAULTS.changeKeyFolder) || SCD2_DEFAULTS.changeKeyFolder).replace(/\\/g, '/').replace(/\/+$/, ''),
+    hashColumns: c.get<string[]>('hashColumns', SCD2_DEFAULTS.hashColumns),
+    extractDateColumn: c.get<string>('extractDateColumn', SCD2_DEFAULTS.extractDateColumn) || SCD2_DEFAULTS.extractDateColumn
+  };
+}
+
+/** The bronze staging rules from settings (`dbtCommander.bronzeStaging.*`), defaults for anything unset. */
+function bronzeRules(): BronzeRules {
+  const c = vscode.workspace.getConfiguration('dbtCommander.bronzeStaging');
+  const str = (k: keyof BronzeRules) => c.get<string>(k, BRONZE_DEFAULTS[k] as string);
+  const list = (k: keyof BronzeRules) => c.get<string[]>(k, BRONZE_DEFAULTS[k] as string[]);
+  return {
+    datetimePattern: str('datetimePattern'),
+    datePattern: str('datePattern'),
+    keyColumn: str('keyColumn'),
+    keyAlias: str('keyAlias') || BRONZE_DEFAULTS.keyAlias,
+    partitionColumns: list('partitionColumns'),
+    orderColumns: list('orderColumns'),
+    deleteColumn: str('deleteColumn'),
+    deleteKeepValues: list('deleteKeepValues')
+  };
+}
 import { Column } from './yamlgen';
 import { callAt } from './jinja';
 
@@ -186,19 +217,126 @@ export async function createStagingModel(deps: EditDeps, target?: unknown, relPa
   const model = path.basename(file, '.sql');
   const edit = new vscode.WorkspaceEdit();
   edit.createFile(vscode.Uri.file(file), { ignoreIfExists: false });
-  edit.insert(vscode.Uri.file(file), new vscode.Position(0, 0), stagingSql(src.source, src.table, columns.map(c => c.name)));
+  // The team's bronze → staging pattern (T-SQL): typed, trimmed, deduped, deletes dropped.
+  const staged = bronzeStaging(src.source, src.table, columns, bronzeRules());
+  edit.insert(vscode.Uri.file(file), new vscode.Position(0, 0), staged.sql);
   if (!(await vscode.workspace.applyEdit(edit))) {
     return undefined;
   }
   await (await vscode.workspace.openTextDocument(vscode.Uri.file(file))).save();
-  if (columns.length) {
-    await deps.writeModelYaml(root, file, model, columns);
+  if (staged.columns.length) {
+    await deps.writeModelYaml(root, file, model, staged.columns); // the staged columns and types, entity_id included
   }
   await vscode.window.showTextDocument(vscode.Uri.file(file), { preview: false });
   if (!columns.length) {
-    void vscode.window.showWarningMessage(`dbt Commander: created ${model} with select * — the source's columns couldn't be read from the warehouse.`);
+    void vscode.window.showWarningMessage(`dbt Commander: created ${model} with SELECT * — the source's columns couldn't be read from the warehouse.`);
   }
   return file;
+}
+
+// ---------- SCD2 change-key model from a staging model ----------
+
+/** Whether any file in the project's macro folders defines `{% macro <name>(` (a manifest can be missing or stale). */
+async function definesMacro(deps: EditDeps, root: string, name: string): Promise<boolean> {
+  const re = new RegExp(`\\{%-?\\s*macro\\s+${name}\\s*\\(`);
+  for (const dir of deps.language.pathsOf(root).macro) {
+    const found = await vscode.workspace.findFiles(new vscode.RelativePattern(path.join(root, ...dir.split('/')), '**/*.sql'));
+    for (const u of found) {
+      try {
+        if (re.test(await fs.promises.readFile(u.fsPath, 'utf8'))) {
+          return true;
+        }
+      } catch {
+        // unreadable: skip
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Create `int_<source>__<entity>_changekey.sql` from a staging model (`stg_<source>__<entity>`) in the team's SCD2
+ * template, plus its YAML entry — and `macros/hash_columns.sql` when the hash needs it and the project lacks it.
+ */
+export async function createChangeKeyModel(deps: EditDeps, target?: unknown, relPathArg?: string): Promise<string | undefined> {
+  const uri = deps.asUri(target) ?? vscode.window.activeTextEditor?.document.uri;
+  const file = uri?.fsPath;
+  const rules = scd2Rules();
+  const staging = file ? path.basename(file, path.extname(file)) : '';
+  const names = changeKeyNames(staging, rules);
+  if (!file || !/\.sql$/i.test(file) || !inProjectPaths(deps.language, file, ['model']) || !names) {
+    void vscode.window.showErrorMessage('dbt Commander: pick a staging model (a stg_….sql file in your model folders).');
+    return undefined;
+  }
+  const root = deps.language.projectRootOf(file)!;
+  const rel =
+    relPathArg ??
+    (await vscode.window.showInputBox({
+      title: `SCD2 change-key model for ${staging}`,
+      prompt: 'Where to create it (relative to the project)',
+      value: `${rules.changeKeyFolder}/${names.model}.sql`,
+      validateInput: v =>
+        !/\.sql$/i.test(v) ? 'End the path with .sql' : exists(path.join(root, ...v.split('/'))) ? 'That file already exists.' : undefined
+    }));
+  if (!rel) {
+    return undefined;
+  }
+  const target2 = path.join(root, ...rel.split('/'));
+  if (exists(target2)) {
+    void vscode.window.showErrorMessage(`dbt Commander: ${rel} already exists.`);
+    return undefined;
+  }
+  // The staging model's columns: the built table (exact), else its YAML entry (Create staging model writes one).
+  const index = await loadManifest(deps.language, root);
+  const pkg = deps.language.projectNameOf(root) ?? path.basename(root);
+  const exe = await deps.requireExe();
+  if (!exe) {
+    return undefined;
+  }
+  let columns: Column[] = (await deps.fetchRelationColumns(exe, root, `ref('${staging.replace(/'/g, "\\'")}')`, staging)).columns;
+  const fromYaml = !columns.length;
+  if (fromYaml) {
+    columns = (index?.models.find(m => m.name === staging && m.package === pkg)?.columns ?? []).map(c => ({ name: c.name, dataType: c.dataType ?? '' }));
+  }
+  // The staging key copy (bronzeStaging.keyAlias) is the key, not data: keep it out of a computed hash.
+  const keyAlias = vscode.workspace.getConfiguration('dbtCommander.bronzeStaging').get<string>('keyAlias', BRONZE_DEFAULTS.keyAlias);
+  const { sql, usesMacro } = changeKeySql(staging, columns.map(c => c.name), rules, keyAlias ? [keyAlias] : []);
+  const model = path.basename(target2, path.extname(target2)); // as named in the prompt
+
+  const edit = new vscode.WorkspaceEdit();
+  edit.createFile(vscode.Uri.file(target2), { ignoreIfExists: false });
+  edit.insert(vscode.Uri.file(target2), new vscode.Position(0, 0), sql);
+  let macroFile: string | undefined;
+  if (usesMacro && !index?.macros.some(m => m.name === 'hash_columns' && m.package === pkg) && !(await definesMacro(deps, root, 'hash_columns'))) {
+    macroFile = path.join(root, ...(deps.language.pathsOf(root).macro[0] ?? 'macros').split('/'), 'hash_columns.sql');
+    if (exists(macroFile)) {
+      macroFile = undefined; // there already (not parsed yet): never overwrite
+    } else {
+      edit.createFile(vscode.Uri.file(macroFile), { ignoreIfExists: true });
+      edit.insert(vscode.Uri.file(macroFile), new vscode.Position(0, 0), HASH_COLUMNS_MACRO);
+    }
+  }
+  if (!(await vscode.workspace.applyEdit(edit))) {
+    return undefined;
+  }
+  for (const f of [target2, macroFile]) {
+    if (f) {
+      await (await vscode.workspace.openTextDocument(vscode.Uri.file(f))).save();
+    }
+  }
+  if (columns.length) {
+    await deps.writeModelYaml(root, target2, model, [...columns, { name: 'attribute_hash', dataType: usesMacro ? 'varchar(64)' : '' }]);
+  }
+  await vscode.window.showTextDocument(vscode.Uri.file(target2), { preview: false });
+  const notes = [
+    macroFile ? `added the hash_columns macro (${path.relative(root, macroFile).split(path.sep).join('/')})` : '',
+    columns.length ? '' : "the staging model's columns couldn't be read (build it first) — fill in attribute_hash",
+    fromYaml && columns.length ? "columns taken from the staging model's YAML (it isn't built) — check attribute_hash" : ''
+  ].filter(Boolean);
+  if (notes.length) {
+    void vscode.window.showInformationMessage(`dbt Commander: created ${model}; ${notes.join('; ')}.`);
+  }
+  return target2;
 }
 
 // ---------- new model ----------

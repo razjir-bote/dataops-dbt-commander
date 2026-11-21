@@ -245,6 +245,9 @@ export class DbtSidebar implements vscode.TreeDataProvider<DbtItem>, vscode.Disp
       .sort((a, b) => a.name.localeCompare(b.name))
       .map(e => {
         const it = new DbtItem(e.name, kind, root, None, { name: e.name });
+        if (kind === 'model' && /^stg_/i.test(e.name)) {
+          it.contextValue = 'model-stg'; // staging models also offer "Create SCD2 change-key model"
+        }
         it.description = this.badge(root, e.uniqueId);
         it.resourceUri = vscode.Uri.file(e.file);
         it.iconPath = new vscode.ThemeIcon(kind === 'model' ? 'symbol-class' : 'table');

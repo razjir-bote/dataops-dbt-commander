@@ -72,7 +72,19 @@ Supports dbt-core 1.x (tested with 1.12); not dbt 2 / Fusion.
   analyses, tests, macros, YAML) and its `models:` / `unit_tests:` YAML entries, shown first in VS Code's refactor
   preview. Versioned models and per-model settings in `dbt_project.yml` are not renamed.
 - **dbt Create staging model** (right-click a source table, or on a `source()` call) — creates
-  `stg_<source>__<table>.sql` selecting the table's columns (read from the warehouse) and its YAML entry.
+  `stg_<system>__<entity>.sql` (the table name split at its first underscore: `ace_aus_accounttag_account` →
+  `stg_ace__aus_accounttag_account`, in `models/staging/ace/`) in the bronze → staging pattern (T-SQL / Synapse) from the table's columns (read from
+  the warehouse), plus its YAML entry: every column trimmed, blank → NULL and typed (`…On` / `_ts` / `_at` →
+  DATETIME2, `_date` → DATE, else NVARCHAR(4000)); the `Id` column kept and copied to `entity_id`; the newest load
+  kept per `_landing_extract_date` + `entity_id` (no key: per every column not starting with `_`); rows with
+  `IsDelete` other than false / 0 dropped. Every rule is a `dbtCommander.bronzeStaging.*` setting.
+- **dbt Create SCD2 change-key model…** (right-click a `stg_` model in the Explorer, sidebar or editor) — creates
+  `models/intermediate/changekey/int_<source>__<entity>_changekey.sql`: only extracts the history table
+  (`int_history.dim_<source>__<entity>__history`) hasn't loaded yet, with `attribute_hash` = `versionnumber`, else
+  `_full_row_hash`, else `{{ hash_columns([...]) }}` over the data columns. `hash_columns` is added to
+  `macros/hash_columns.sql` when needed (never overwritten): it hashes each column, then groups of 250 column
+  hashes, so `HASHBYTES` never gets more than 8000 bytes (Synapse) however wide the table. Settings:
+  `dbtCommander.scd2.*`.
 - **dbt New model…** (right-click a model folder) — creates a model from a template (`dbtCommander.newModelTemplate`,
   `{{name}}` placeholder) with a YAML entry.
 - **Open in dbt docs** — jumps to a model's / source's / seed's / exposure's page in the static docs site
@@ -130,7 +142,8 @@ ones the venv path, target and extra flags are read from your user settings only
 npm install
 npm run typecheck        # tsc, no output
 npm run compile && npm test   # unit tests (node:test)
-npm run test:integration # real VS Code + dbt-core 1.12 + duckdb against test/fixtures/demo
+npm run test:integration # real VS Code + dbt-core 1.12 + duckdb against test/fixtures/demo, groups in parallel
+npm run test:integration:serial # the same in one VS Code, step by step (for debugging)
 npm run package          # builds dist/ with esbuild and creates the .vsix
 ```
 

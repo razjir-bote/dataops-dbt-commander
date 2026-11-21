@@ -4,16 +4,41 @@ const assert = require('assert');
 const path = require('path');
 const fs = require('fs');
 const { execFileSync } = require('child_process');
+const { groupOf } = require('./groups');
 
 exports.run = async () => {
   const root = process.env.DBT_PROJ;
   const out = [];
+  // Parallel runs (run.js): ITEST_GROUP selects one group of sections (groups.js); unset = every step, in order.
+  const only = process.env.ITEST_GROUP;
+  let group = '1';
+  let setUp = false;
   const step = async (name, fn) => {
+    if (only && group !== only) {
+      return;
+    }
+    const started = Date.now();
+    const secs = () => `(${((Date.now() - started) / 1000).toFixed(1)}s)`;
     try {
       await fn();
-      out.push('PASS ' + name);
+      out.push(`PASS ${name} ${secs()}`);
     } catch (e) {
-      out.push('FAIL ' + name + ': ' + (e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : e));
+      out.push(`FAIL ${name} ${secs()}: ` + (e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : e));
+    }
+  };
+  // What the steps before a group would have left behind: seeds loaded, everything built, a catalog.
+  const setup = async () => {
+    const all = vscode.Uri.file(root);
+    await vscode.commands.executeCommand('dbtCommander.seed');
+    await vscode.commands.executeCommand('dbtCommander.build', all, [all]);
+    await vscode.commands.executeCommand('dbtCommander.docsGenerate'); // openDocsAfterGenerate=false
+  };
+  /** Start a section of the suite (see groups.js); in a parallel run, the first section of a later group sets up. */
+  const section = async name => {
+    group = groupOf(name);
+    if (only && group === only && !setUp && group !== '1') {
+      setUp = true;
+      await step(`setup for group ${group}: seed, build, docs generate`, setup);
     }
   };
   const uri = (...p) => vscode.Uri.file(path.join(root, ...p));
@@ -41,6 +66,8 @@ exports.run = async () => {
   const newModelIn = (folderUri, name) => api.projectEdits.newModel(folderUri, name);
   const rename = (u, name) => api.projectEdits.rename(u, name, false);
   const cfg = () => vscode.workspace.getConfiguration('dbtCommander');
+
+  await section('core');
 
   await step('venv setting read from workspace', async () => assert.ok(fs.existsSync(cfg().get('venvPath'))));
 
@@ -212,6 +239,7 @@ exports.run = async () => {
   });
 
   // ----- language features (manifest.json exists after the runs above) -----
+  await section('language');
 
   const definition = async (rel, needle) => {
     const doc = await vscode.workspace.openTextDocument(uri(...rel));
@@ -271,6 +299,7 @@ exports.run = async () => {
   });
 
   // ----- v0.4: macros, YAML generation, sidebar -----
+  await section('v04');
 
   await step('go to definition: project macro', async () => {
     const d = await definition(['analyses', 'uses_macro.sql'], 'cents_to_dollars');
@@ -360,6 +389,7 @@ exports.run = async () => {
   });
 
   // ----- v0.6: sidebar folders / sections, lineage -----
+  await section('v06');
 
   await step('sidebar: seed folder and section buttons run on everything inside', async () => {
     const top = await api.sidebar.getChildren();
@@ -474,6 +504,7 @@ exports.run = async () => {
   });
 
   // ----- v0.5: Testing panel, hovers -----
+  await section('v05');
 
   const testItems = async () => {
     await api.tests.refresh();
@@ -562,6 +593,7 @@ exports.run = async () => {
   });
 
   // ----- v0.7: retry, rerun, run status, last run, columns, references, custom folders -----
+  await section('v07');
 
   const waitFor = async (what, check, ms = 8000) => {
     const end = Date.now() + ms;
@@ -669,6 +701,7 @@ exports.run = async () => {
   });
 
   // ----- v0.8: debug, docs, staging, new model, rename, exposures -----
+  await section('v08');
 
   await step('dbt debug: connection check summary', async () => {
     const r = await vscode.commands.executeCommand('dbtCommander.debug');
@@ -698,16 +731,19 @@ exports.run = async () => {
       created.push(f, file('models', 'staging', 'seeded'));
       const sql = fs.readFileSync(f, 'utf8');
       assert.match(sql, /source\('seeded', 's'\)/);
-      assert.match(sql, /select\r?\n        id,\r?\n        name\r?\n/); // VS Code writes CRLF on Windows
+      // The bronze template: `id` is the key (any case) — kept, and copied to entity_id; deduped on it. (VS Code may write CRLF.)
+      assert.match(sql, /CAST\(\[id\] AS NVARCHAR\(4000\)\)\)\), ''\) AS \[entity_id\],\r?\n\r?\n {8}NULLIF\(LTRIM\(RTRIM\(CAST\(\[id\] AS NVARCHAR\(4000\)\)\)\), ''\) AS \[id\],/);
+      assert.match(sql, /AS \[name\]\r?\n\r?\n {4}FROM source/);
+      assert.match(sql, /PARTITION BY\r?\n {16}\[entity_id\]\r?\n/);
       await vscode.workspace.saveAll(false);
       const yml = fs.readFileSync(file('models', 'staging', 'seeded', 'stg_seeded__s.yml'), 'utf8');
-      assert.match(yml, /- name: stg_seeded__s[\s\S]*- name: id[\s\S]*- name: name/);
+      assert.match(yml, /- name: stg_seeded__s[\s\S]*- name: entity_id[\s\S]*- name: id[\s\S]*- name: name/);
       // A source the warehouse doesn't have: select * with a TODO.
       const raw = await child(await api.sidebar.getChildren(await child(top, 'Sources')), 'raw');
       const orders = await child(await api.sidebar.getChildren(raw), 'orders');
       const f2 = await createStaging(orders, 'models/staging/raw/stg_raw__orders.sql');
       created.push(f2, file('models', 'staging', 'raw'));
-      assert.match(fs.readFileSync(f2, 'utf8'), /TODO: list the columns[\s\S]*select \* from source/);
+      assert.match(fs.readFileSync(f2, 'utf8'), /TODO: list the columns[\s\S]*SELECT \*\r?\nFROM source/);
     } finally {
       // Save, then close the new files so Windows lets the folders be deleted.
       await vscode.workspace.saveAll(false);
@@ -721,6 +757,8 @@ exports.run = async () => {
   await step('new model from the template, with a YAML entry', async () => {
     const yml = file('models', 'staging', 'stg_a.yml');
     const before = fs.existsSync(yml) ? fs.readFileSync(yml, 'utf8') : undefined;
+    // The folder's YAML file (made by a Generate YAML step in a serial run): the new model's entry goes there.
+    if (before === undefined) fs.writeFileSync(yml, 'version: 2\nmodels:\n  - name: stg_a\n');
     const f = await newModelIn(uri('models', 'staging'), 'zz_new');
     try {
       assert.ok(same(f, file('models', 'staging', 'zz_new.sql')));
@@ -731,6 +769,7 @@ exports.run = async () => {
       await vscode.commands.executeCommand('workbench.action.closeAllEditors');
       fs.rmSync(f, { force: true, maxRetries: 5, retryDelay: 200 });
       if (before !== undefined) await writeRetry(yml, before);
+      else fs.rmSync(yml, { force: true, maxRetries: 5, retryDelay: 200 });
     }
   });
 
@@ -858,6 +897,7 @@ exports.run = async () => {
   });
 
   // ----- v0.10: macro hover, scratchpad, selection / CTE preview, YAML quick fixes, run-state pruning -----
+  await section('v10');
   // At the end of the suite: these add a temporary model, and dbt show re-parses the project.
 
   const closeAll = () => vscode.commands.executeCommand('workbench.action.closeAllEditors');
@@ -986,6 +1026,7 @@ exports.run = async () => {
   });
 
   // ----- v0.11: preview data for export, column profile, relationships / dbt_utils quick fixes -----
+  await section('v11');
 
   await step('preview keeps the rows for Copy / Save CSV', async () => {
     await vscode.commands.executeCommand('dbtCommander.preview', uri('models', 'b.sql'));
@@ -1048,6 +1089,7 @@ exports.run = async () => {
   });
 
   // ----- review fixes -----
+  await section('review');
 
   await step('paths with spaces: a model and its folder build (dbt splits selectors on spaces)', async () => {
     const dir = file('models', 'my folder');
@@ -1095,6 +1137,7 @@ exports.run = async () => {
   });
 
   // ----- v0.12: optional SQLFluff -----
+  await section('v12');
 
   const sqlfluffProblems = u => vscode.languages.getDiagnostics(u).filter(d => d.source === 'sqlfluff');
 
@@ -1152,6 +1195,7 @@ exports.run = async () => {
   });
 
   // ----- v0.13: YAML autocomplete -----
+  await section('v13');
 
   await step('YAML autocomplete: model names, columns (catalog), tests, keys, config values, ref()', async () => {
     const f = file('models', 'zz_complete.yml');
@@ -1199,6 +1243,35 @@ exports.run = async () => {
     } finally {
       await closeAll();
       fs.rmSync(f, { force: true });
+    }
+  });
+
+  // ----- v0.14: SCD2 change-key model -----
+  await section('v14');
+
+  await step('SCD2 change-key model from a staging model: template, hash_columns macro, compiles with dbt', async () => {
+    const rel = 'models/intermediate/changekey/int_a_changekey.sql';
+    const macro = file('macros', 'hash_columns.sql');
+    try {
+      // stg_a (select 1 as id) has neither versionnumber nor _full_row_hash: the hash_columns macro is used.
+      const created = await api.projectEdits.createChangeKey(uri('models', 'staging', 'stg_a.sql'), rel);
+      assert.ok(created && same(created, file(...rel.split('/'))), String(created));
+      const sql = fs.readFileSync(created, 'utf8');
+      assert.match(sql, /identifier='dim_a__history'/);
+      assert.match(sql, /FROM \{\{ ref\('stg_a'\) \}\}/);
+      assert.match(sql, /\{\{ hash_columns\(\['id'\]\) \}\} AS \[attribute_hash\]/);
+      assert.ok(fs.existsSync(macro), 'hash_columns macro not written');
+      // dbt renders the template and the macro (compile doesn't run the T-SQL).
+      await vscode.commands.executeCommand('dbtCommander.compile', vscode.Uri.file(created));
+      const compiled = fs.readFileSync(file('target', 'compiled', 'demo', ...rel.split('/')), 'utf8');
+      assert.match(compiled, /HASHBYTES\('SHA2_256', CAST\(\[id\] AS NVARCHAR\(4000\)\)\)/);
+      assert.match(compiled, /SELECT CAST\(NULL AS DATETIME2\) AS valid_from/, 'no history table yet: the empty branch');
+      // Not for a model that isn't a staging model.
+      assert.equal(await api.projectEdits.createChangeKey(uri('models', 'b.sql'), 'models/intermediate/changekey/x.sql'), undefined);
+    } finally {
+      await closeAll();
+      fs.rmSync(file('models', 'intermediate'), { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+      fs.rmSync(macro, { force: true });
     }
   });
 

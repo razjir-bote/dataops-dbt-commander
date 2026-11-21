@@ -2,7 +2,7 @@
   "name": "dataops-dbt-commander",
   "displayName": "DataOps dbt Commander",
   "description": "Run, build, test, compile and preview dbt models from the VS Code Explorer and editor with dbt-core 1.x from a configured venv.",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "publisher": "local",
   "license": "MIT",
   "engines": {
@@ -254,6 +254,11 @@
         "command": "dbtCommander.sqlfluff.fix",
         "title": "SQLFluff: Fix file",
         "category": "dbt Commander"
+      },
+      {
+        "command": "dbtCommander.createChangeKey",
+        "title": "dbt Create SCD2 change-key model…",
+        "category": "dbt Commander"
       }
     ],
     "submenus": [
@@ -366,6 +371,11 @@
           "command": "dbtCommander.newModel",
           "group": "refactor@2",
           "when": "explorerResourceIsFolder && (resourcePath =~ /[\\\\/]models([\\\\/]|$)/i || resourcePath in dbtCommander.modelPaths)"
+        },
+        {
+          "command": "dbtCommander.createChangeKey",
+          "when": "!explorerResourceIsFolder && resourceFilename =~ /^stg_.*\\.sql$/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i",
+          "group": "refactor@2"
         }
       ],
       "commandPalette": [
@@ -496,6 +506,10 @@
         {
           "command": "dbtCommander.sqlfluff.fix",
           "when": "dbtCommander.sqlfluffActive && editorIsOpen && resourceScheme == file && resourceExtname =~ /^\\.sql$/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
+        },
+        {
+          "command": "dbtCommander.createChangeKey",
+          "when": "editorIsOpen && resourceScheme == file && resourceExtname =~ /^\\.sql$/i && (resourcePath =~ /[\\\\/]models([\\\\/]|$)/i || resourcePath in dbtCommander.modelPaths) && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i && resourceFilename =~ /^stg_.*\\.sql$/i"
         }
       ],
       "view/title": [
@@ -533,7 +547,7 @@
       "view/item/context": [
         {
           "command": "dbtCommander.tree.run",
-          "when": "view == dbtCommander.project && viewItem =~ /^(model|modelFolder|section-models)$/",
+          "when": "view == dbtCommander.project && viewItem =~ /^(model|model-stg|modelFolder|section-models)$/",
           "group": "inline@1"
         },
         {
@@ -543,12 +557,12 @@
         },
         {
           "command": "dbtCommander.tree.build",
-          "when": "view == dbtCommander.project && viewItem =~ /^(model|modelFolder|section-models|seed|seedFolder|section-seeds|project)$/",
+          "when": "view == dbtCommander.project && viewItem =~ /^(model|model-stg|modelFolder|section-models|seed|seedFolder|section-seeds|project)$/",
           "group": "inline@2"
         },
         {
           "command": "dbtCommander.tree.test",
-          "when": "view == dbtCommander.project && viewItem =~ /^(model|modelFolder|section-models)$/",
+          "when": "view == dbtCommander.project && viewItem =~ /^(model|model-stg|modelFolder|section-models)$/",
           "group": "inline@3"
         },
         {
@@ -568,22 +582,22 @@
         },
         {
           "command": "dbtCommander.showLineage",
-          "when": "view == dbtCommander.project && viewItem =~ /^(model|seed|snapshot|sourceTable|exposure|semanticModel)$/",
+          "when": "view == dbtCommander.project && viewItem =~ /^(model|model-stg|seed|snapshot|sourceTable|exposure|semanticModel)$/",
           "group": "model@0"
         },
         {
           "command": "dbtCommander.compile",
-          "when": "view == dbtCommander.project && viewItem == model",
+          "when": "view == dbtCommander.project && viewItem =~ /^model(-stg)?$/",
           "group": "model@1"
         },
         {
           "command": "dbtCommander.preview",
-          "when": "view == dbtCommander.project && viewItem == model",
+          "when": "view == dbtCommander.project && viewItem =~ /^model(-stg)?$/",
           "group": "model@2"
         },
         {
           "command": "dbtCommander.generateYaml",
-          "when": "view == dbtCommander.project && viewItem == model",
+          "when": "view == dbtCommander.project && viewItem =~ /^model(-stg)?$/",
           "group": "model@3"
         },
         {
@@ -598,17 +612,17 @@
         },
         {
           "command": "dbtCommander.tree.run",
-          "when": "view == dbtCommander.project && viewItem =~ /^(model|modelFolder|section-models)$/",
+          "when": "view == dbtCommander.project && viewItem =~ /^(model|model-stg|modelFolder|section-models)$/",
           "group": "0_dbt@1"
         },
         {
           "command": "dbtCommander.tree.build",
-          "when": "view == dbtCommander.project && viewItem =~ /^(model|modelFolder|section-models|seed|seedFolder|section-seeds|project)$/",
+          "when": "view == dbtCommander.project && viewItem =~ /^(model|model-stg|modelFolder|section-models|seed|seedFolder|section-seeds|project)$/",
           "group": "0_dbt@2"
         },
         {
           "command": "dbtCommander.tree.test",
-          "when": "view == dbtCommander.project && viewItem =~ /^(model|modelFolder|section-models|seed|seedFolder|section-seeds)$/",
+          "when": "view == dbtCommander.project && viewItem =~ /^(model|model-stg|modelFolder|section-models|seed|seedFolder|section-seeds)$/",
           "group": "0_dbt@3"
         },
         {
@@ -628,22 +642,22 @@
         },
         {
           "command": "dbtCommander.tree.buildUpstream",
-          "when": "view == dbtCommander.project && viewItem =~ /^(model|modelFolder|section-models|seed|seedFolder|section-seeds)$/",
+          "when": "view == dbtCommander.project && viewItem =~ /^(model|model-stg|modelFolder|section-models|seed|seedFolder|section-seeds)$/",
           "group": "1_graph@1"
         },
         {
           "command": "dbtCommander.tree.buildDownstream",
-          "when": "view == dbtCommander.project && viewItem =~ /^(model|modelFolder|section-models|seed|seedFolder|section-seeds)$/",
+          "when": "view == dbtCommander.project && viewItem =~ /^(model|model-stg|modelFolder|section-models|seed|seedFolder|section-seeds)$/",
           "group": "1_graph@2"
         },
         {
           "command": "dbtCommander.tree.buildUpDownstream",
-          "when": "view == dbtCommander.project && viewItem =~ /^(model|modelFolder|section-models|seed|seedFolder|section-seeds)$/",
+          "when": "view == dbtCommander.project && viewItem =~ /^(model|model-stg|modelFolder|section-models|seed|seedFolder|section-seeds)$/",
           "group": "1_graph@3"
         },
         {
           "command": "dbtCommander.renameModel",
-          "when": "view == dbtCommander.project && viewItem == model",
+          "when": "view == dbtCommander.project && viewItem =~ /^model(-stg)?$/",
           "group": "refactor@1"
         },
         {
@@ -658,7 +672,7 @@
         },
         {
           "command": "dbtCommander.openInDocs",
-          "when": "view == dbtCommander.project && viewItem =~ /^(model|seed|snapshot|sourceTable|exposure|semanticModel)$/",
+          "when": "view == dbtCommander.project && viewItem =~ /^(model|model-stg|seed|snapshot|sourceTable|exposure|semanticModel)$/",
           "group": "model@4"
         },
         {
@@ -675,6 +689,11 @@
           "command": "dbtCommander.showLineage",
           "when": "view == dbtCommander.lineage && viewItem =~ /^lineage-/",
           "group": "docs@0"
+        },
+        {
+          "command": "dbtCommander.createChangeKey",
+          "when": "view == dbtCommander.project && viewItem == model-stg",
+          "group": "refactor@2"
         }
       ],
       "editor/context": [
@@ -692,6 +711,11 @@
           "command": "dbtCommander.sqlfluff.fix",
           "when": "dbtCommander.sqlfluffActive && resourceScheme == file && resourceExtname =~ /^\\.sql$/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i",
           "group": "dbt@3"
+        },
+        {
+          "command": "dbtCommander.createChangeKey",
+          "when": "resourceScheme == file && resourceExtname =~ /^\\.sql$/i && (resourcePath =~ /[\\\\/]models([\\\\/]|$)/i || resourcePath in dbtCommander.modelPaths) && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i && resourceFilename =~ /^stg_.*\\.sql$/i",
+          "group": "dbt@4"
         }
       ]
     },
@@ -769,6 +793,94 @@
           "type": "string",
           "default": "",
           "description": "Extra flags for every SQLFluff run, e.g. `--rules LT01,LT02` or `--templater dbt`."
+        },
+        "dbtCommander.bronzeStaging.datetimePattern": {
+          "type": "string",
+          "default": "(On|_ts|_at|_datetime)$",
+          "description": "Create staging model: columns whose name matches this regex (case-sensitive) are typed DATETIME2."
+        },
+        "dbtCommander.bronzeStaging.datePattern": {
+          "type": "string",
+          "default": "_date$",
+          "description": "Create staging model: columns whose name matches this regex (case-sensitive) are typed DATE."
+        },
+        "dbtCommander.bronzeStaging.keyColumn": {
+          "type": "string",
+          "default": "Id",
+          "description": "Create staging model: the key column (any case). It is kept and also copied to the key alias; empty = no key."
+        },
+        "dbtCommander.bronzeStaging.keyAlias": {
+          "type": "string",
+          "default": "entity_id",
+          "description": "Create staging model: name of the copy of the key column."
+        },
+        "dbtCommander.bronzeStaging.partitionColumns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "_landing_extract_date"
+          ],
+          "description": "Create staging model: dedupe partition columns before the key (or before every column not starting with _ when the table has no key)."
+        },
+        "dbtCommander.bronzeStaging.orderColumns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "_bronze_loaded_at_utc_ts",
+            "_bronze_run_id"
+          ],
+          "description": "Create staging model: dedupe keeps the newest row by these columns (descending)."
+        },
+        "dbtCommander.bronzeStaging.deleteColumn": {
+          "type": "string",
+          "default": "IsDelete",
+          "description": "Create staging model: delete-flag column; empty = no delete filter."
+        },
+        "dbtCommander.bronzeStaging.deleteKeepValues": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "false",
+            "0"
+          ],
+          "description": "Create staging model: rows are kept when LOWER(delete column) is one of these."
+        },
+        "dbtCommander.scd2.historySchema": {
+          "type": "string",
+          "default": "int_history",
+          "description": "SCD2 change-key model: schema of the history table (passed to generate_schema_name)."
+        },
+        "dbtCommander.scd2.historyPrefix": {
+          "type": "string",
+          "default": "dim_",
+          "description": "SCD2 change-key model: history table name prefix (<prefix><source>__<entity>__history)."
+        },
+        "dbtCommander.scd2.changeKeyFolder": {
+          "type": "string",
+          "default": "models/intermediate/changekey",
+          "description": "SCD2 change-key model: folder for int_<source>__<entity>_changekey.sql (relative to the project)."
+        },
+        "dbtCommander.scd2.hashColumns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "versionnumber",
+            "_full_row_hash"
+          ],
+          "description": "SCD2 change-key model: the first of these the staging model has is used as attribute_hash; with none, the hash_columns macro hashes the data columns."
+        },
+        "dbtCommander.scd2.extractDateColumn": {
+          "type": "string",
+          "default": "_landing_extract_date",
+          "description": "SCD2 change-key model: the staging model's extract date, matched against the history table's valid_from."
         }
       }
     },
@@ -881,7 +993,8 @@
     "test": "node --test \"out/test/*.test.js\"",
     "test:integration": "npm run build && node test/integration/run.js",
     "vscode:prepublish": "npm run build",
-    "package": "vsce package --allow-missing-repository"
+    "package": "vsce package --allow-missing-repository",
+    "test:integration:serial": "npm run build && node test/integration/run.js --serial"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
