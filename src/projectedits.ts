@@ -35,7 +35,7 @@ function bronzeRules(): BronzeRules {
     deleteKeepValues: list('deleteKeepValues')
   };
 }
-import { Column } from './yamlgen';
+import { Column, addSourceTable, csvHeader } from './yamlgen';
 import { callAt } from './jinja';
 
 /** What the v0.8 project-edit commands need from the extension. */
@@ -51,6 +51,8 @@ export interface EditDeps {
   projectCommand(args: string[], label: string, root: string): Promise<{ root: string; code: number | undefined } | undefined>;
   runCaptured(exe: string, args: string[], cwd: string, title: string): Promise<string>;
   asUri(x: unknown): vscode.Uri | undefined;
+  /** Remembers choices (e.g. the last source name) per workspace. */
+  memento?: vscode.Memento;
 }
 
 const exists = (p: string) => fs.existsSync(p);
@@ -337,6 +339,122 @@ export async function createChangeKeyModel(deps: EditDeps, target?: unknown, rel
     void vscode.window.showInformationMessage(`dbt Commander: created ${model}; ${notes.join('; ')}.`);
   }
   return target2;
+}
+
+// ---------- seed as source ----------
+
+const SOURCE_NAME_KEY = 'dbtCommander.seedSourceName';
+
+/**
+ * Add the selected seed CSVs as tables of a source (default `bronze`) in `_<source>__sources.yml`, pointing at
+ * the seeds' built tables, so `source('bronze', '<seed>')` and Create staging model work on sample data.
+ * Returns the YAML file written.
+ */
+export async function addSeedsAsSource(
+  deps: EditDeps,
+  target?: unknown,
+  targets?: unknown[],
+  answers?: { source: string; file: string }
+): Promise<string | undefined> {
+  const uris = [...(targets ?? []), target]
+    .map(t => deps.asUri(t))
+    .filter((u): u is vscode.Uri => !!u && /\.csv$/i.test(u.fsPath) && inProjectPaths(deps.language, u.fsPath, ['seed']));
+  const files = [...new Map(uris.map(u => [u.fsPath.toLowerCase(), u.fsPath])).values()];
+  if (!files.length) {
+    void vscode.window.showErrorMessage('dbt Commander: pick one or more seed .csv files in your seed folders.');
+    return undefined;
+  }
+  const root = deps.language.projectRootOf(files[0])!;
+  if (files.some(f => deps.language.projectRootOf(f) !== root)) {
+    void vscode.window.showErrorMessage('dbt Commander: the seeds are in different dbt projects. Add them separately.');
+    return undefined;
+  }
+  // The seeds' schemas come from the manifest: parse first when a seed isn't in it yet.
+  const seedOf = async () => {
+    const index = await loadManifest(deps.language, root);
+    return (f: string) => index?.seeds.find(s => s.file.toLowerCase() === f.toLowerCase());
+  };
+  let find = await seedOf();
+  if (files.some(f => !find(f))) {
+    await deps.projectCommand(['parse'], 'parse', root);
+    find = await seedOf();
+  }
+  const missing = files.filter(f => !find(f));
+  if (missing.length) {
+    void vscode.window.showErrorMessage(`dbt Commander: ${missing.map(f => path.basename(f)).join(', ')} isn't in the manifest — check dbt parse in the terminal.`);
+    return undefined;
+  }
+  const source =
+    answers?.source ??
+    (await vscode.window.showInputBox({
+      title: `Add ${files.length === 1 ? path.basename(files[0]) : `${files.length} seeds`} as a source`,
+      prompt: 'Source name',
+      value: deps.memento?.get<string>(SOURCE_NAME_KEY) ?? 'bronze',
+      validateInput: v => (/^[A-Za-z_][\w]*$/.test(v.trim()) ? undefined : 'Use letters, digits and _ (not starting with a digit).')
+    }))?.trim();
+  if (!source) {
+    return undefined;
+  }
+  await deps.memento?.update(SOURCE_NAME_KEY, source);
+  const rel =
+    answers?.file ??
+    (await vscode.window.showInputBox({
+      title: `Source ${source}`,
+      prompt: 'YAML file for the source (relative to the project; created if missing)',
+      value: `${deps.language.pathsOf(root).model[0] ?? 'models'}/staging/${source}/_${source}__sources.yml`,
+      validateInput: v => (/\.ya?ml$/i.test(v.trim()) ? undefined : 'End the path with .yml')
+    }))?.trim();
+  if (!rel) {
+    return undefined;
+  }
+  const yml = path.join(root, ...rel.split('/'));
+  let text = exists(yml) ? await currentText(vscode.Uri.file(yml)) : '';
+  const added: string[] = [];
+  const already: string[] = [];
+  try {
+    for (const f of files) {
+      const seed = find(f)!;
+      const columns = csvHeader(await fs.promises.readFile(f, 'utf8'));
+      const r = addSourceTable(text, {
+        source,
+        ...(seed.schema ? { schema: seed.schema } : {}),
+        ...(seed.database ? { database: seed.database } : {}),
+        table: seed.name,
+        description: `Loaded from the seed ${seed.name} (dbt seed).`,
+        columns
+      });
+      text = r.text;
+      (r.status === 'added' ? added : already).push(seed.name);
+    }
+  } catch (e) {
+    void vscode.window.showErrorMessage(`dbt Commander: can't edit ${rel}: ${e instanceof Error ? e.message : e}`);
+    return undefined;
+  }
+  if (added.length) {
+    const uri = vscode.Uri.file(yml);
+    const edit = new vscode.WorkspaceEdit();
+    if (exists(yml)) {
+      const doc = await vscode.workspace.openTextDocument(uri);
+      edit.replace(uri, new vscode.Range(doc.positionAt(0), doc.positionAt(doc.getText().length)), text);
+    } else {
+      edit.createFile(uri, { ignoreIfExists: false });
+      edit.insert(uri, new vscode.Position(0, 0), text);
+    }
+    if (!(await vscode.workspace.applyEdit(edit))) {
+      return undefined;
+    }
+    await (await vscode.workspace.openTextDocument(uri)).save();
+    await vscode.window.showTextDocument(uri, { preview: false });
+    await deps.projectCommand(['parse'], 'parse', root); // the source shows in the sidebar / completion
+  }
+  const parts = [
+    added.length ? `added ${added.join(', ')} to source ${source}` : '',
+    already.length ? `${already.join(', ')} already in source ${source}` : ''
+  ].filter(Boolean);
+  void vscode.window
+    .showInformationMessage(`dbt Commander: ${parts.join('; ')}. Run dbt seed so the table${files.length === 1 ? '' : 's'} exist${files.length === 1 ? 's' : ''}.`, 'Run dbt seed')
+    .then(pick => pick && vscode.commands.executeCommand('dbtCommander.seedFiles', vscode.Uri.file(files[0]), files.map(f => vscode.Uri.file(f))));
+  return yml;
 }
 
 // ---------- new model ----------

@@ -70,6 +70,10 @@ export interface NodeEntry {
   columnName?: string;
   /** For tests: a singular test (its own .sql file) rather than a generic test declared in YAML. */
   singular?: boolean;
+  /** Seeds / snapshots: where dbt builds it (after +schema / generate_schema_name). */
+  schema?: string;
+  /** Only when the node's config sets a database (otherwise the target's). */
+  database?: string;
 }
 
 export type NodeType = 'model' | 'seed' | 'snapshot' | 'source' | 'exposure' | 'semantic_model' | 'test' | 'other';
@@ -260,7 +264,10 @@ export function parseManifest(
       uniqueId: n.unique_id ?? id,
       name: n.name,
       package: n.package_name,
-      file: fileFor(root, rootPackage, n.package_name, n.original_file_path, packagesDir)
+      file: fileFor(root, rootPackage, n.package_name, n.original_file_path, packagesDir),
+      ...(n.resource_type === 'seed' || n.resource_type === 'snapshot'
+        ? { ...(text(n.schema) ? { schema: n.schema } : {}), ...(text(n.config?.database) && text(n.database) ? { database: n.database } : {}) }
+        : {})
     };
     if (n.resource_type === 'seed') {
       seeds.push(entry);

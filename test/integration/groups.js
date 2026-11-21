@@ -5,7 +5,7 @@
 // v05 24 · v07 27 · v08 82 · v10–v13 76 · setup ≈ 17 per group.
 exports.GROUPS = [
   ['core'],
-  ['language', 'v04', 'v06'],
+  ['language', 'v04', 'v06', 'v15'],
   ['v05', 'v08'],
   ['v07', 'v10', 'v11', 'review', 'v12', 'v13', 'v14']
 ];

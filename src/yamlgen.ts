@@ -179,3 +179,127 @@ export function mergeColumns(text: string, model: string, columns: Column[]): { 
   }
   return { text: doc.toString(FALLBACK(indentSeq)).replace(/\r?\n/g, eolOf(text)), added };
 }
+
+// ---------- seed as source ----------
+
+/** The column names in a CSV's first record (quotes, a BOM and CRLF handled). */
+export function csvHeader(text: string): string[] {
+  const s = text.replace(/^\ufeff/, '');
+  const out: string[] = [];
+  let cur = '';
+  let quoted = false;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (quoted) {
+      if (ch === '"' && s[i + 1] === '"') {
+        cur += '"';
+        i++;
+      } else if (ch === '"') {
+        quoted = false;
+      } else {
+        cur += ch;
+      }
+    } else if (ch === '"') {
+      quoted = true;
+    } else if (ch === ',') {
+      out.push(cur);
+      cur = '';
+    } else if (ch === '\n' || ch === '\r') {
+      break;
+    } else {
+      cur += ch;
+    }
+  }
+  if (cur || out.length) {
+    out.push(cur);
+  }
+  return out.map(c => c.trim()).filter((c, i, all) => c || i < all.length - 1);
+}
+
+export interface SourceTableSpec {
+  source: string;
+  schema?: string;
+  database?: string;
+  table: string;
+  description: string;
+  columns: string[];
+}
+
+function tableLines(t: SourceTableSpec, dash: number, indentSeq: boolean): string[] {
+  const key = dash + 2;
+  const cols = t.columns.map(c => `${sp(indentSeq ? key + 2 : key)}- name: ${scalar(c)}`);
+  return [`${sp(dash)}- name: ${scalar(t.table)}`, `${sp(key)}description: ${JSON.stringify(t.description)}`, ...(cols.length ? [`${sp(key)}columns:`, ...cols] : [])];
+}
+
+function sourceLines(t: SourceTableSpec, dash: number, indentSeq: boolean): string[] {
+  const key = dash + 2;
+  return [
+    `${sp(dash)}- name: ${scalar(t.source)}`,
+    ...(t.database ? [`${sp(key)}database: ${scalar(t.database)}`] : []),
+    ...(t.schema ? [`${sp(key)}schema: ${scalar(t.schema)}`] : []),
+    `${sp(key)}tables:`,
+    ...tableLines(t, indentSeq ? key + 2 : key, indentSeq)
+  ];
+}
+
+/**
+ * Add a source table (and its source, and `sources:`, when missing) to a YAML file's text, leaving every existing
+ * line untouched. `exists`: the source already has a table of that name — nothing changed.
+ */
+export function addSourceTable(text: string, t: SourceTableSpec): { text: string; status: 'added' | 'exists' } {
+  const eol = eolOf(text);
+  if (!text.trim()) {
+    return { text: ['version: 2', '', 'sources:', ...sourceLines(t, 2, true)].join(eol) + eol, status: 'added' };
+  }
+  if (!yamlUsable(text)) {
+    throw new Error('the YAML file has errors or several documents, so it cannot be edited safely');
+  }
+  const doc = parseDocument(text);
+  const sources = doc.get('sources', true);
+  if (isSeq(sources) && !sources.flow && sources.items.length && (sources.items[0] as YAMLMap).range) {
+    const indentSeq = indentsSequences(text, sources as YAMLSeq);
+    const entry = (sources as YAMLSeq).items.find((i): i is YAMLMap => isMap(i) && String(i.get('name')) === t.source);
+    if (!entry) {
+      const { dash } = itemIndent(text, (sources.items[0] as YAMLMap).range![0]);
+      const last = sources.items[sources.items.length - 1] as YAMLMap;
+      return { text: insertAfter(text, last.range![1], sourceLines(t, dash, indentSeq)), status: 'added' };
+    }
+    const tables = entry.get('tables', true);
+    if (isSeq(tables) && tables.items.some(i => isMap(i) && String(i.get('name')) === t.table)) {
+      return { text, status: 'exists' };
+    }
+    if (isSeq(tables) && !tables.flow && tables.items.length && (tables.items[0] as YAMLMap).range) {
+      const { dash } = itemIndent(text, (tables.items[0] as YAMLMap).range![0]);
+      const last = tables.items[tables.items.length - 1] as YAMLMap;
+      return { text: insertAfter(text, last.range![1], tableLines(t, dash, indentSeq)), status: 'added' };
+    }
+    if (tables === undefined && entry.range && entry.items[0]?.key && isScalar(entry.items[0].key) && entry.items[0].key.range) {
+      const key = colOf(text, entry.items[0].key.range[0]);
+      return { text: insertAfter(text, entry.range[1], [`${sp(key)}tables:`, ...tableLines(t, indentSeq ? key + 2 : key, indentSeq)]), status: 'added' };
+    }
+  }
+  if (!doc.has('sources')) {
+    const body = ['sources:', ...sourceLines(t, 2, true)].join(eol) + eol;
+    return { text: text + (text.endsWith('\n') ? '' : eol) + body, status: 'added' };
+  }
+  // Flow / empty lists: let the YAML library rewrite the file.
+  const tableNode = { name: t.table, description: t.description, ...(t.columns.length ? { columns: t.columns.map(c => ({ name: c })) } : {}) };
+  const list = isSeq(sources) ? sources : (doc.createNode([]) as YAMLSeq);
+  if (!isSeq(sources)) {
+    doc.set('sources', list);
+  }
+  list.flow = false;
+  const existing = list.items.find((i): i is YAMLMap => isMap(i) && String(i.get('name')) === t.source);
+  if (existing) {
+    const tl = existing.get('tables', true);
+    const seq = isSeq(tl) ? tl : (doc.createNode([]) as YAMLSeq);
+    if (!isSeq(tl)) {
+      existing.set('tables', seq);
+    }
+    seq.flow = false;
+    seq.add(doc.createNode(tableNode));
+  } else {
+    list.add(doc.createNode({ name: t.source, ...(t.database ? { database: t.database } : {}), ...(t.schema ? { schema: t.schema } : {}), tables: [tableNode] }));
+  }
+  return { text: doc.toString(FALLBACK(true)).replace(/\r?\n/g, eol), status: 'added' };
+}

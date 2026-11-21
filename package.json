@@ -259,6 +259,11 @@
         "command": "dbtCommander.createChangeKey",
         "title": "dbt Create SCD2 change-key model…",
         "category": "dbt Commander"
+      },
+      {
+        "command": "dbtCommander.addSeedAsSource",
+        "title": "dbt Add seed as source…",
+        "category": "dbt Commander"
       }
     ],
     "submenus": [
@@ -278,6 +283,11 @@
           "command": "dbtCommander.seedFiles",
           "when": "resourceExtname =~ /^\\.csv$/i && (resourcePath =~ /[\\\\/]seeds[\\\\/]/i || resourcePath in dbtCommander.seedPaths) && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i",
           "group": "navigation@91"
+        },
+        {
+          "command": "dbtCommander.addSeedAsSource",
+          "when": "resourceExtname =~ /^\\.csv$/i && (resourcePath =~ /[\\\\/]seeds[\\\\/]/i || resourcePath in dbtCommander.seedPaths) && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i",
+          "group": "navigation@92"
         }
       ],
       "editor/title/context": [
@@ -510,6 +520,10 @@
         {
           "command": "dbtCommander.createChangeKey",
           "when": "editorIsOpen && resourceScheme == file && resourceExtname =~ /^\\.sql$/i && (resourcePath =~ /[\\\\/]models([\\\\/]|$)/i || resourcePath in dbtCommander.modelPaths) && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i && resourceFilename =~ /^stg_.*\\.sql$/i"
+        },
+        {
+          "command": "dbtCommander.addSeedAsSource",
+          "when": "editorIsOpen && resourceExtname =~ /^\\.csv$/i && (resourcePath =~ /[\\\\/]seeds[\\\\/]/i || resourcePath in dbtCommander.seedPaths) && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
         }
       ],
       "view/title": [
@@ -694,6 +708,11 @@
           "command": "dbtCommander.createChangeKey",
           "when": "view == dbtCommander.project && viewItem == model-stg",
           "group": "refactor@2"
+        },
+        {
+          "command": "dbtCommander.addSeedAsSource",
+          "when": "view == dbtCommander.project && viewItem == seed",
+          "group": "refactor@3"
         }
       ],
       "editor/context": [

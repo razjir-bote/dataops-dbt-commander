@@ -37,7 +37,7 @@ import { DbtLineage } from './lineage';
 import { RunStatusStore } from './runstatus';
 import { DbtLastRun } from './lastrun';
 import { MIGRATED_KEYS, Scope, plannedMigrations } from './migrate';
-import { EditDeps, checkConnection, createChangeKeyModel, createStagingModel, newModel, openInDocs, renameModel } from './projectedits';
+import { EditDeps, addSeedsAsSource, checkConnection, createChangeKeyModel, createStagingModel, newModel, openInDocs, renameModel } from './projectedits';
 import { DbtCodeActions, QueryDeps, addColumnTests, newScratchpad, previewSelection, profileColumn, profileYamlColumn, runShow, trackScratchpads } from './query';
 import { loadCatalog } from './hover';
 import { PreviewPanel } from './previewPanel';
@@ -848,6 +848,7 @@ export interface DbtRunnerApi {
     rename(target: unknown, name: string, preview?: boolean): Promise<boolean>;
     createStaging(target: unknown, relPath: string): Promise<string | undefined>;
     createChangeKey(target: unknown, relPath: string): Promise<string | undefined>;
+    addSeedsAsSource(targets: unknown[], source: string, file: string): Promise<string | undefined>;
     newModel(folder: unknown, name: string): Promise<string | undefined>;
   };
   /** Optional SQLFluff linting (off by default). */
@@ -1129,12 +1130,14 @@ export function activate(ctx: vscode.ExtensionContext): DbtRunnerApi {
     writeModelYaml,
     projectCommand,
     runCaptured,
-    asUri
+    asUri,
+    memento: ctx.workspaceState
   };
   ctx.subscriptions.push(
     vscode.commands.registerCommand('dbtCommander.renameModel', (target?: unknown) => renameModel(edits, target)),
     vscode.commands.registerCommand('dbtCommander.createStaging', (target?: unknown) => createStagingModel(edits, target)),
     vscode.commands.registerCommand('dbtCommander.createChangeKey', (target?: unknown) => createChangeKeyModel(edits, target)),
+    vscode.commands.registerCommand('dbtCommander.addSeedAsSource', (target?: unknown, targets?: unknown[]) => addSeedsAsSource(edits, target, targets)),
     vscode.commands.registerCommand('dbtCommander.newModel', (target?: unknown) => newModel(edits, target)),
     vscode.commands.registerCommand('dbtCommander.openInDocs', (target?: unknown) => openInDocs(edits, target)),
     vscode.commands.registerCommand('dbtCommander.debug', () => checkConnection(edits))
@@ -1153,6 +1156,7 @@ export function activate(ctx: vscode.ExtensionContext): DbtRunnerApi {
       rename: (target, name, preview) => renameModel(edits, target, name, preview),
       createStaging: (target, relPath) => createStagingModel(edits, target, relPath),
       createChangeKey: (target, relPath) => createChangeKeyModel(edits, target, relPath),
+      addSeedsAsSource: (targets, source, file) => addSeedsAsSource(edits, undefined, targets, { source, file }),
       newModel: (folder, name) => newModel(edits, folder, name)
     },
     sqlfluff,

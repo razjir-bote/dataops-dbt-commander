@@ -78,6 +78,10 @@ Supports dbt-core 1.x (tested with 1.12); not dbt 2 / Fusion.
   DATETIME2, `_date` → DATE, else NVARCHAR(4000)); the `Id` column kept and copied to `entity_id`; the newest load
   kept per `_landing_extract_date` + `entity_id` (no key: per every column not starting with `_`); rows with
   `IsDelete` other than false / 0 dropped. Every rule is a `dbtCommander.bronzeStaging.*` setting.
+- **dbt Add seed as source…** (right-click seed CSVs in the Explorer or the dbt sidebar) — adds them as tables of a
+  source (default `bronze`) in `models/staging/<source>/_<source>__sources.yml`, pointing at the seeds' tables
+  (schema from the manifest), with the CSV header as columns — so `source('bronze', '<seed>')` and *Create
+  staging model* work on sample data. Existing entries are left alone; run *dbt seed* to load the tables.
 - **dbt Create SCD2 change-key model…** (right-click a `stg_` model in the Explorer, sidebar or editor) — creates
   `models/intermediate/changekey/int_<source>__<entity>_changekey.sql`: only extracts the history table
   (`int_history.dim_<source>__<entity>__history`) hasn't loaded yet, with `attribute_hash` = `versionnumber`, else

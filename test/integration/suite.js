@@ -1280,5 +1280,35 @@ exports.run = async () => {
     }
   });
 
+  // ----- v0.15: seed as source -----
+  await section('v15');
+
+  await step('add seeds as a source: YAML entry at the seeds\' schema, queryable with source() after dbt seed', async () => {
+    const rel = 'models/staging/bronze/_bronze__sources.yml';
+    const yml = file(...rel.split('/'));
+    try {
+      const written = await api.projectEdits.addSeedsAsSource([uri('seeds', 's.csv'), uri('seeds', 'ref', 'countries.csv')], 'bronze', rel);
+      assert.ok(written && same(written, yml), String(written));
+      const doc = require('yaml').parse(fs.readFileSync(yml, 'utf8'));
+      assert.equal(doc.sources[0].name, 'bronze');
+      assert.equal(doc.sources[0].schema, 'main');
+      assert.deepEqual(doc.sources[0].tables.map(t => [t.name, t.columns.map(c => c.name)]), [['s', ['id', 'name']], ['countries', ['code', 'name']]]);
+      // Again: nothing changes.
+      const before = fs.readFileSync(yml, 'utf8');
+      await api.projectEdits.addSeedsAsSource([uri('seeds', 's.csv')], 'bronze', rel);
+      assert.equal(fs.readFileSync(yml, 'utf8'), before);
+      // The source reads the seed's table.
+      await vscode.commands.executeCommand('dbtCommander.seed');
+      const ed = await api.query.newScratchpad(root);
+      await ed.edit(e => e.replace(new vscode.Range(0, 0, ed.document.lineCount, 0), "select count(*) as n from {{ source('bronze', 's') }}"));
+      const r = await api.query.previewSelection(ed);
+      assert.ok(r && r.rows && Number(Object.values(r.rows[0])[0]) > 0, JSON.stringify(r));
+      await vscode.commands.executeCommand('workbench.action.revertAndCloseActiveEditor');
+    } finally {
+      await closeAll();
+      fs.rmSync(file('models', 'staging', 'bronze'), { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    }
+  });
+
   fs.writeFileSync(process.env.ITEST_OUT, out.join('\n'));
 };
