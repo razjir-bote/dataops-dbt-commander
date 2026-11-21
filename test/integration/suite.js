@@ -188,16 +188,21 @@ exports.run = async () => {
       const venv = path.resolve(cfg().get('venvPath')).toLowerCase();
       const all = procs();
       const byPid = new Map(all.map(p => [p.pid, p]));
-      const ids = new Set(all.filter(p => p.name === 'dbt.exe' && p.exe.startsWith(venv)).map(p => p.pid));
       // Real children only: Windows reuses ids, so a boot-time process (csrss, winlogon...) can name a reused
       // id as its parent. A child must have been created after its parent.
-      for (let grew = true; grew; ) {
-        grew = false;
-        for (const p of all) {
-          const parent = byPid.get(p.ppid);
-          if (ids.has(p.ppid) && !ids.has(p.pid) && parent && p.created >= parent.created) { ids.add(p.pid); grew = true; }
+      const grow = ids => {
+        for (let grew = true; grew; ) {
+          grew = false;
+          for (const p of all) {
+            const parent = byPid.get(p.ppid);
+            if (ids.has(p.ppid) && !ids.has(p.pid) && parent && p.created >= parent.created) { ids.add(p.pid); grew = true; }
+          }
         }
-      }
+        return ids;
+      };
+      // Only this VS Code's dbt: other test groups may be running dbt from the same venv at the same time.
+      const ours = grow(new Set([process.pid]));
+      const ids = grow(new Set(all.filter(p => ours.has(p.pid) && p.name === 'dbt.exe' && p.exe.startsWith(venv)).map(p => p.pid)));
       const tree = all.filter(p => ids.has(p.pid)).map(p => `${p.pid}:${p.name}`);
       for (const e of vscode.tasks.taskExecutions) e.terminate();
       await running;
