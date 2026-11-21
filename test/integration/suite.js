@@ -1310,5 +1310,34 @@ exports.run = async () => {
     }
   });
 
+  await step('create staging model from a sources YAML entry (lightbulb on the table)', async () => {
+    const yml = file('models', 'zz_yaml_src.yml');
+    fs.writeFileSync(yml, 'version: 2\nsources:\n  - name: yamlsrc\n    schema: main\n    tables:\n      - name: s\n        columns:\n          - name: id\n');
+    const created = [];
+    try {
+      await vscode.commands.executeCommand('dbtCommander.parse');
+      const doc = await vscode.workspace.openTextDocument(yml);
+      const actions = await actionsAt(doc.uri, 5); // '      - name: s'
+      const create = actions.find(a => a.title === 'Create staging model for yamlsrc.s');
+      assert.ok(create, actions.map(a => a.title).join(', '));
+      const f = await createStaging(create.command.arguments[0], 'models/staging/yamlsrc/stg_yamlsrc__s.sql');
+      created.push(f, file('models', 'staging', 'yamlsrc'));
+      const sql = fs.readFileSync(f, 'utf8');
+      assert.match(sql, /source\('yamlsrc', 's'\)/);
+      assert.match(sql, /AS \[entity_id\]/, 'bronze template, id is the key');
+      // From a column line of the same table: the same table (the editor right-click path).
+      const ed = await vscode.window.showTextDocument(doc);
+      ed.selection = new vscode.Selection(7, 12, 7, 12);
+      const again = await createStaging(undefined, 'models/staging/yamlsrc/stg_yamlsrc__s_2.sql');
+      created.push(again);
+      assert.match(fs.readFileSync(again, 'utf8'), /source\('yamlsrc', 's'\)/);
+    } finally {
+      await vscode.workspace.saveAll(false);
+      await closeAll();
+      for (const c of [...created, yml]) fs.rmSync(c, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+      await vscode.commands.executeCommand('dbtCommander.parse');
+    }
+  });
+
   fs.writeFileSync(process.env.ITEST_OUT, out.join('\n'));
 };

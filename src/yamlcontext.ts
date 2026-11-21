@@ -257,3 +257,21 @@ export function yamlContextAt(text: string, line: number, col: number): YamlCont
   }
   return { path, kind, ...(key ? { key } : {}), word, ...(quote ? { quote } : {}), siblings: [...siblings], items, listNames };
 }
+
+/** The source table (`sources:` → `tables:` item) whose entry holds 0-based `line` — its name line, keys or columns. */
+export function sourceTableAt(text: string, line: number): { source: string; table: string } | undefined {
+  const lines = text.split('\n');
+  if (line < 0 || line >= lines.length) {
+    return undefined;
+  }
+  const ctx = yamlContextAt(text, line, lines[line].replace(/\r$/, '').length);
+  const p = ctx.path;
+  if (p[0] !== 'sources' || p[1] !== '-' || p[2] !== 'tables' || p[3] !== '-') {
+    return undefined;
+  }
+  const source = ctx.items[0]?.name;
+  // On the table's own `- name:` line its name is the value being "typed".
+  const own = p.length === 4 && ctx.kind === 'value' && ctx.key === 'name' ? unquote((ctx.quote ?? '') + ctx.word) : undefined;
+  const table = ctx.items[1]?.name ?? own;
+  return source && table ? { source, table } : undefined;
+}

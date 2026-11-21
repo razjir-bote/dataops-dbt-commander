@@ -71,7 +71,8 @@ Supports dbt-core 1.x (tested with 1.12); not dbt 2 / Fusion.
 - **dbt Rename model…** (right-click a model) — renames the file, every `ref()` to it (models, snapshots,
   analyses, tests, macros, YAML) and its `models:` / `unit_tests:` YAML entries, shown first in VS Code's refactor
   preview. Versioned models and per-model settings in `dbt_project.yml` are not renamed.
-- **dbt Create staging model** (right-click a source table, or on a `source()` call) — creates
+- **dbt Create staging model** (right-click a source table in the sidebar, on a `source()` call, or in a table's entry
+  under `sources:` in YAML — also a lightbulb on that entry) — creates
   `stg_<system>__<entity>.sql` (the table name split at its first underscore: `ace_aus_accounttag_account` →
   `stg_ace__aus_accounttag_account`, in `models/staging/ace/`) in the bronze → staging pattern (T-SQL / Synapse) from the table's columns (read from
   the warehouse), plus its YAML entry: every column trimmed, blank → NULL and typed (`…On` / `_ts` / `_at` →

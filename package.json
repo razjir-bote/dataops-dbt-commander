@@ -491,7 +491,7 @@
         },
         {
           "command": "dbtCommander.createStaging",
-          "when": "editorIsOpen && resourceExtname =~ /^\\.sql$/i"
+          "when": "editorIsOpen && resourceExtname =~ /^\\.(sql|ya?ml)$/i"
         },
         {
           "command": "dbtCommander.newModel",
@@ -735,6 +735,11 @@
           "command": "dbtCommander.createChangeKey",
           "when": "resourceScheme == file && resourceExtname =~ /^\\.sql$/i && (resourcePath =~ /[\\\\/]models([\\\\/]|$)/i || resourcePath in dbtCommander.modelPaths) && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i && resourceFilename =~ /^stg_.*\\.sql$/i",
           "group": "dbt@4"
+        },
+        {
+          "command": "dbtCommander.createStaging",
+          "when": "resourceScheme == file && resourceExtname =~ /^\\.ya?ml$/i && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i",
+          "group": "dbt@5"
         }
       ]
     },

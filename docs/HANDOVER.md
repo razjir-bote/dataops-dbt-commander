@@ -18,7 +18,9 @@ is `dbtCommander.*`; `migrate.ts` copies old `dbtRunner.*` user and workspace se
   (command `dbtCommander.addSeedAsSource`, Explorer seed CSVs + sidebar seeds); pure `csvHeader` / `addSourceTable`
   in `yamlgen.ts` (text insertion, existing lines untouched; flow / empty lists rewritten by the YAML library like
   `appendModel`). Seed schema / database from the manifest (`NodeEntry.schema`, `.database` only when configured);
-  parses first if a seed is missing; last source name remembered in workspace state.
+  parses first if a seed is missing; last source name remembered in workspace state. Also: *Create staging model*
+  from a sources YAML entry (`sourceTableAt` in `yamlcontext.ts`; editor right-click in YAML + a lightbulb on the
+  table's own lines).
   Design: `docs/superpowers/specs/2026-11-21-dbt-commander-v0.15-seed-as-source-design.md`.
 - **v0.14.0 — released** (https://github.com/razjir-bote/dataops-dbt-commander/releases/tag/v0.14.0) — **SCD2 change-key model.** `scd2.ts` (pure: `changeKeyNames`, `changeKeySql`,
   `HASH_COLUMNS_MACRO`) + `createChangeKeyModel` in `projectedits.ts` (command `dbtCommander.createChangeKey`,

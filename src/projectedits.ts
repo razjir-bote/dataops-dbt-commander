@@ -37,6 +37,7 @@ function bronzeRules(): BronzeRules {
 }
 import { Column, addSourceTable, csvHeader } from './yamlgen';
 import { callAt } from './jinja';
+import { sourceTableAt } from './yamlcontext';
 
 /** What the v0.8 project-edit commands need from the extension. */
 export interface EditDeps {
@@ -175,15 +176,26 @@ function sourceOf(target: unknown): { source: string; table: string; file?: stri
     return { source: t.node.source, table: t.node.table };
   }
   const ed = vscode.window.activeTextEditor;
-  const call = ed ? callAt(ed.document.lineAt(ed.selection.active.line).text, ed.selection.active.character) : undefined;
-  return call?.kind === 'source' ? { source: call.source, table: call.table, file: ed!.document.uri.fsPath } : undefined;
+  if (!ed) {
+    return undefined;
+  }
+  const line = ed.selection.active.line;
+  // In a sources YAML file: the table entry the cursor is in (its name line, keys or columns).
+  if (/\.ya?ml$/i.test(ed.document.fileName)) {
+    const st = sourceTableAt(ed.document.getText(), line);
+    return st && { ...st, file: ed.document.uri.fsPath };
+  }
+  const call = callAt(ed.document.lineAt(line).text, ed.selection.active.character);
+  return call?.kind === 'source' ? { source: call.source, table: call.table, file: ed.document.uri.fsPath } : undefined;
 }
 
 /** Create `stg_<source>__<table>.sql` selecting the source's columns, plus its YAML entry. */
 export async function createStagingModel(deps: EditDeps, target?: unknown, relPathArg?: string): Promise<string | undefined> {
   const src = sourceOf(target);
   if (!src) {
-    void vscode.window.showErrorMessage("dbt Commander: pick a source table (sidebar) or put the cursor on a source('…', '…') call.");
+    void vscode.window.showErrorMessage(
+      "dbt Commander: pick a source table (sidebar), put the cursor on a source('…', '…') call, or in a table's entry under sources: in YAML."
+    );
     return undefined;
   }
   const t = target as { root?: string } | undefined;

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { yamlContextAt } from '../yamlcontext';
+import { sourceTableAt, yamlContextAt } from '../yamlcontext';
 
 /** Context at the `|` marker (`¦` where the text itself has a `|`, e.g. block scalars). */
 function at(text: string) {
@@ -107,4 +107,33 @@ test('indentless list: siblings of a key in the item', () => {
 test('multi-document files: the previous document does not count', () => {
   const c = at(doc('version: 2', 'models: []', '---', '|'));
   assert.deepEqual(c.siblings, []);
+});
+
+test('sourceTableAt: the source table whose entry holds the line (its name line, keys, columns)', () => {
+  const t = doc(
+    'version: 2',
+    'sources:',
+    '  - name: bronze',
+    '    schema: main',
+    '    tables:',
+    '      - name: ace_aus_accounttag_account',
+    '        description: x',
+    '        columns:',
+    '          - name: Id',
+    "      - name: 'other'",
+    'models:',
+    '  - name: m'
+  );
+  assert.equal(sourceTableAt(t, 2), undefined, 'the source line itself: no table');
+  assert.deepEqual(sourceTableAt(t, 5), { source: 'bronze', table: 'ace_aus_accounttag_account' });
+  assert.deepEqual(sourceTableAt(t, 6), { source: 'bronze', table: 'ace_aus_accounttag_account' });
+  assert.deepEqual(sourceTableAt(t, 8), { source: 'bronze', table: 'ace_aus_accounttag_account' }, 'from a column');
+  assert.deepEqual(sourceTableAt(t, 9), { source: 'bronze', table: 'other' }, 'quoted name');
+  assert.equal(sourceTableAt(t, 11), undefined, 'models are not sources');
+});
+
+test('sourceTableAt: indentless lists and CRLF', () => {
+  const t = 'sources:\r\n- name: raw\r\n  tables:\r\n  - name: orders\r\n    columns:\r\n    - name: id\r\n';
+  assert.deepEqual(sourceTableAt(t, 3), { source: 'raw', table: 'orders' });
+  assert.deepEqual(sourceTableAt(t, 5), { source: 'raw', table: 'orders' });
 });

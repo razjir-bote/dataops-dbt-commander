@@ -10,6 +10,7 @@ import { columnRef } from './scaffold';
 import { scalar } from './yamlgen';
 import { killTree } from './runner';
 import { TestSpec, addTestsEdit, columnAt, columnOwnerAt, legacyTestArguments, parseValueList } from './yamlfix';
+import { sourceTableAt } from './yamlcontext';
 
 export interface QueryDeps {
   requireExe(): Promise<string | undefined>;
@@ -360,7 +361,14 @@ export class DbtCodeActions implements vscode.CodeActionProvider {
     }
     const owner = columnOwnerAt(doc.getText(), line);
     if (!owner) {
-      return undefined;
+      // A source table's own lines (not its columns): create its staging model.
+      const st = sourceTableAt(doc.getText(), line);
+      if (!st) {
+        return undefined;
+      }
+      const a = new vscode.CodeAction(`Create staging model for ${st.source}.${st.table}`, vscode.CodeActionKind.QuickFix);
+      a.command = { command: 'dbtCommander.createStaging', title: a.title, arguments: [{ data: { source: st.source, name: st.table }, root }] };
+      return [a];
     }
     const out: vscode.CodeAction[] = [];
     const ask = (title: string, command: string, arg: unknown) => {
