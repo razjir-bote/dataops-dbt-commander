@@ -1,7 +1,7 @@
 # DataOps dbt Commander — developer handover
 
 Keep this file current: update it in the same commit as any change to features, architecture, build/release
-process, or known issues. Last updated: 2026-11-21 (v0.14.0 released; v0.15 Add seed as source implemented, not committed).
+process, or known issues. Last updated: 2026-11-21 (v0.15.0 released).
 
 ## What this is
 A VS Code extension (TypeScript) for working with **dbt-core 1.x** (tested with 1.12.7) on **Windows**, running
@@ -14,7 +14,7 @@ Since v0.9.0 the extension ID is `local.dataops-dbt-commander` and every command
 is `dbtCommander.*`; `migrate.ts` copies old `dbtRunner.*` user and workspace settings once on activation.
 
 ## Status
-- **v0.15 (unreleased, version still 0.14.0): Add seed as source.** `addSeedsAsSource` in `projectedits.ts`
+- **v0.15.0 — released** (https://github.com/razjir-bote/dataops-dbt-commander/releases/tag/v0.15.0) — **Add seed as source.** `addSeedsAsSource` in `projectedits.ts`
   (command `dbtCommander.addSeedAsSource`, Explorer seed CSVs + sidebar seeds); pure `csvHeader` / `addSourceTable`
   in `yamlgen.ts` (text insertion, existing lines untouched; flow / empty lists rewritten by the YAML library like
   `appendModel`). Seed schema / database from the manifest (`NodeEntry.schema`, `.database` only when configured);
@@ -154,7 +154,7 @@ npm run package              # esbuild → dist/extension.js, then vsce → .vsi
   `npm run test:integration:serial` (or `--serial`) runs every step in one VS Code, in order, as before.
   Groups are lists of suite sections (`await section('v08')`) in `groups.js`; every group after the first starts with
   a setup step (seed, build, docs generate) standing in for what earlier steps left behind. A new step goes in a
-  section; a new section must be added to a group. Rebalance with the step times. Currently 71 checks (+ 3 setup
+  section; a new section must be added to a group. Rebalance with the step times. Currently 72 checks (+ 3 setup
   steps in parallel runs). The suite talks to the extension through the API returned by `activate()`.
 - **CI** (`.github/workflows/ci.yml`): windows-latest, Node 22, Python 3.12; typecheck, unit, integration,
   package. A pushed tag `vX.Y.Z` that equals `package.json` version publishes a GitHub release with the vsix.
