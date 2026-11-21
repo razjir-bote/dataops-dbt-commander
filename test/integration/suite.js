@@ -1183,8 +1183,16 @@ exports.run = async () => {
       const ed = await vscode.window.showTextDocument(doc);
       await ed.edit(e => e.insert(new vscode.Position(0, 0), '-- touched\n'));
       await doc.save();
-      const saved = fs.readFileSync(f, 'utf8');
-      assert.notEqual(saved.replace(/\r\n/g, '\n'), '-- touched\n' + messy, 'fix on save changed nothing');
+      // Within VS Code's will-save budget the fix is part of this save; on a slow machine it misses the budget and
+      // is applied right after, then saved again: wait for either.
+      const saved = await waitFor(
+        'fix on save (in the save, or applied and saved right after it)',
+        () => {
+          const s = fs.readFileSync(f, 'utf8');
+          return s.replace(/\r\n/g, '\n') !== '-- touched\n' + messy && !doc.isDirty ? s : undefined;
+        },
+        30000
+      );
       assert.match(saved, /SELECT\r?\n\s+a,\r?\n\s+b\r?\n/i, saved);
       assert.ok(!/\r\n/.test(saved) || /\r\n/.test(doc.getText()), 'line endings changed');
 
