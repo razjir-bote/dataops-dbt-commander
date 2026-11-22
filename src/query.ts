@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { execFile } from 'child_process';
-import { cteQueryAt, inlineSql, selectedCteQuery, trailingCteQuery } from './scratch';
+import { QueryPick, inlineSql, pickQuery } from './scratch';
 import { dbtActivity } from './autoparseCore';
 import { ShowResult, parseShowOutput } from './show';
 import { PreviewOptions, PreviewPanel } from './previewPanel';
@@ -34,6 +34,10 @@ export interface QueryDeps {
   relations(root: string): Promise<{ label: string; description?: string; to: string; uniqueId: string }[]>;
   /** Known column names of a node (documented in YAML, or from catalog.json). */
   columnNames(root: string, uniqueId: string): Promise<string[]>;
+  /** `dbt compile --select <model>`, then its compiled file. `error` undefined = cancelled. */
+  compileModel(exe: string, root: string, file: string): Promise<{ sql?: string; error?: string }>;
+  /** `dbt compile --inline <sql> --quiet` (stdout is the compiled SQL). `error` undefined = cancelled. */
+  compileInline(exe: string, root: string, sql: string, label: string): Promise<{ sql?: string; error?: string }>;
 }
 
 export interface ShowOptions extends PreviewOptions {
@@ -149,40 +153,13 @@ export async function previewSelection(deps: QueryDeps, editor = vscode.window.a
     void vscode.window.showWarningMessage('dbt Commander: this file is not in a dbt project.');
     return undefined;
   }
-  const selected = editor.selection.isEmpty ? '' : doc.getText(editor.selection); // the primary selection only
-  const isModel = doc.uri.scheme === 'file' && deps.isModelFile(doc.uri.fsPath);
-  const base = isModel ? path.basename(doc.uri.fsPath, path.extname(doc.uri.fsPath)) : 'Query';
-  let sql: string;
-  let title: string;
-  // Whole CTEs selected (`b as (…)`, `with a as (…), b as (…),`): preview the last one, with the model's CTEs
-  // before it so the ones it reads from are there.
-  const trailing = !selected.trim()
-    ? undefined
-    : selectedCteQuery(doc.getText(), doc.offsetAt(editor.selection.start), doc.offsetAt(editor.selection.end)) ?? trailingCteQuery(selected);
-  if (trailing) {
-    sql = trailing.sql;
-    title = `${base} › ${trailing.name}`;
-  } else if (selected.trim()) {
-    sql = selected;
-    title = `${base} (selection)`;
-  } else if (isModel) {
-    const cte = cteQueryAt(doc.getText(), doc.offsetAt(editor.selection.active));
-    if (cte) {
-      sql = cte.sql;
-      title = `${base} › ${cte.name}`;
-    } else if (doc.isDirty) {
-      // Like selections and CTEs: preview the editor's text without saving the file.
-      sql = doc.getText();
-      title = `${base} (unsaved)`;
-    } else {
-      await deps.previewModel(doc.uri);
-      return undefined;
-    }
-  } else {
-    sql = doc.getText();
-    title = base;
+  const { pick, base } = queryIn(deps, editor);
+  if (pick.kind === 'model') {
+    await deps.previewModel(doc.uri);
+    return undefined;
   }
-  sql = inlineSql(sql);
+  const title = `${base}${pick.suffix}`;
+  const sql = inlineSql(pick.sql);
   if (!sql) {
     void vscode.window.showInformationMessage('dbt Commander: nothing to run.');
     return undefined;
@@ -194,6 +171,83 @@ export async function previewSelection(deps: QueryDeps, editor = vscode.window.a
   }
   const exe = await deps.requireExe();
   return exe ? runShow(exe, root, title, ['--inline', sql], deps) : undefined;
+}
+
+/** What Preview / Copy compiled work on in this editor (the primary selection only), and the name for titles. */
+function queryIn(deps: QueryDeps, editor: vscode.TextEditor): { pick: QueryPick; base: string } {
+  const doc = editor.document;
+  const isModel = doc.uri.scheme === 'file' && deps.isModelFile(doc.uri.fsPath);
+  const pick = pickQuery(
+    doc.getText(),
+    { start: doc.offsetAt(editor.selection.start), end: doc.offsetAt(editor.selection.end), cursor: doc.offsetAt(editor.selection.active) },
+    { isModel, isDirty: doc.isDirty }
+  );
+  return { pick, base: isModel ? path.basename(doc.uri.fsPath, path.extname(doc.uri.fsPath)) : 'Query' };
+}
+
+/**
+ * Copy the compiled SQL of what Preview Selection / CTE would run — a selection, CTE, unsaved model or scratchpad
+ * through `dbt compile --inline`, a saved model through `dbt compile --select` — to the clipboard. `target`: a
+ * model picked in the Explorer / sidebar (when it isn't the active editor's file). Resolves with what was copied.
+ */
+export async function copyCompiled(deps: QueryDeps, target?: vscode.Uri): Promise<string | undefined> {
+  const editor = vscode.window.activeTextEditor;
+  const samePath = (a: vscode.Uri, b: vscode.Uri) =>
+    a.scheme === b.scheme && (process.platform === 'win32' ? a.fsPath.toLowerCase() === b.fsPath.toLowerCase() : a.fsPath === b.fsPath);
+  const fromEditor = editor && (!target || samePath(editor.document.uri, target)) ? editor : undefined;
+  const doc = fromEditor?.document;
+  const file = target?.fsPath ?? doc?.uri.fsPath;
+  const root = file ? deps.projectRootOf(file) : undefined;
+  // Models and scratchpads only: a macro / test / analysis file isn't a query to compile on its own.
+  if (!file || !root || (doc && !doc.isUntitled && doc.uri.scheme !== 'file') || !(deps.isModelFile(file) || isScratchpad(doc))) {
+    void vscode.window.showWarningMessage('dbt Commander: open a model or scratchpad in a dbt project (or pick a model) to copy its compiled SQL.');
+    return undefined;
+  }
+  let label: string;
+  let compiled: { sql?: string; error?: string } | undefined;
+  let note = '';
+  const exe = await deps.requireExe();
+  if (!exe) {
+    return undefined;
+  }
+  const { pick, base } = fromEditor ? queryIn(deps, fromEditor) : { pick: { kind: 'model' } as QueryPick, base: path.basename(file, path.extname(file)) };
+  if (pick.kind === 'model') {
+    label = base;
+    compiled = await deps.compileModel(exe, root, file);
+  } else {
+    label = `${base}${pick.suffix}`;
+    const sql = inlineSql(pick.sql);
+    if (!sql) {
+      void vscode.window.showInformationMessage('dbt Commander: nothing to compile.');
+      return undefined;
+    }
+    if (process.platform === 'win32' && sql.length > 30000) {
+      void vscode.window.showWarningMessage('dbt Commander: this SQL is too long to compile inline on Windows; select a smaller part.');
+      return undefined;
+    }
+    compiled = await deps.compileInline(exe, root, sql, label);
+    if (pick.suffix === ' (unsaved)') {
+      note = ' Unsaved edits: {{ this }} and is_incremental() compile as in a scratchpad.';
+    }
+  }
+  if (compiled.sql === undefined) {
+    if (compiled.error !== undefined) {
+      void vscode.window.showErrorMessage(`dbt Commander: couldn't compile ${label}: ${compiled.error}`);
+    }
+    return undefined;
+  }
+  const sql = compiled.sql.replace(/\s+$/, '') + '\n';
+  await vscode.env.clipboard.writeText(sql);
+  const lines = sql.split('\n').length - 1;
+  void vscode.window
+    .showInformationMessage(`dbt Commander: copied compiled SQL of ${label} (${lines} line${lines === 1 ? '' : 's'}).${note}`, 'Open')
+    .then(async pickAction => {
+      if (pickAction === 'Open') {
+        await vscode.window.showTextDocument(await vscode.workspace.openTextDocument({ language: 'sql', content: sql }), { preview: true });
+      }
+    })
+    .then(undefined, () => undefined);
+  return sql;
 }
 
 /** Profile one column (rows, nulls, distinct, min, max, top values) in the preview panel. */

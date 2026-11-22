@@ -10,7 +10,7 @@ import * as path from 'path';
 const LIST: [group: string, slots: string[][]][] = [
   ['1_run', [['run', 'tree.run'], ['build', 'tree.build'], ['test', 'tree.test'], ['seedFiles', 'tree.seed'], ['tree.snapshot'], ['tree.runTest']]],
   ['2_graph', [['buildUpstream', 'tree.buildUpstream'], ['buildDownstream', 'tree.buildDownstream'], ['buildUpDownstream', 'tree.buildUpDownstream']]],
-  ['3_inspect', [['compile'], ['preview'], ['previewSelection'], ['showLineage'], ['openInDocs']]],
+  ['3_inspect', [['compile'], ['copyCompiled'], ['preview'], ['previewSelection'], ['showLineage'], ['openInDocs']]],
   ['4_create', [['generateYaml'], ['newModel'], ['createStaging'], ['createChangeKey'], ['addSeedAsSource']]],
   ['5_refactor', [['renameModel']]],
   ['6_sqlfluff', [['sqlfluff.lint'], ['sqlfluff.fix']]],

@@ -269,6 +269,12 @@
         "command": "dbtCommander.autoParseOutput",
         "title": "Show Background Parse Output",
         "category": "dbt Commander"
+      },
+      {
+        "command": "dbtCommander.copyCompiled",
+        "title": "Copy Compiled SQL",
+        "category": "dbt Commander",
+        "icon": "$(copy)"
       }
     ],
     "submenus": [
@@ -350,19 +356,24 @@
           "group": "3_inspect@1"
         },
         {
-          "command": "dbtCommander.preview",
+          "command": "dbtCommander.copyCompiled",
           "when": "!explorerResourceIsFolder && resourceExtname =~ /^\\.sql$/i",
           "group": "3_inspect@2"
         },
         {
+          "command": "dbtCommander.preview",
+          "when": "!explorerResourceIsFolder && resourceExtname =~ /^\\.sql$/i",
+          "group": "3_inspect@3"
+        },
+        {
           "command": "dbtCommander.showLineage",
           "when": "!explorerResourceIsFolder && resourceExtname =~ /^\\.sql$/i || !explorerResourceIsFolder && resourceExtname =~ /^\\.csv$/i",
-          "group": "3_inspect@4"
+          "group": "3_inspect@5"
         },
         {
           "command": "dbtCommander.openInDocs",
           "when": "!explorerResourceIsFolder && resourceExtname =~ /^\\.sql$/i || !explorerResourceIsFolder && resourceExtname =~ /^\\.csv$/i",
-          "group": "3_inspect@5"
+          "group": "3_inspect@6"
         },
         {
           "command": "dbtCommander.generateYaml",
@@ -530,6 +541,10 @@
         {
           "command": "dbtCommander.addSeedAsSource",
           "when": "editorIsOpen && resourceExtname =~ /^\\.csv$/i && (resourcePath =~ /[\\\\/]seeds[\\\\/]/i || resourcePath in dbtCommander.seedPaths) && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
+        },
+        {
+          "command": "dbtCommander.copyCompiled",
+          "when": "editorIsOpen && (dbtCommander.isScratchpad || resourceExtname =~ /^\\.sql$/i && (resourcePath =~ /[\\\\/]models([\\\\/]|$)/i || resourcePath in dbtCommander.modelPaths) && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i)"
         }
       ],
       "view/title": [
@@ -661,29 +676,34 @@
           "group": "3_inspect@1"
         },
         {
-          "command": "dbtCommander.preview",
+          "command": "dbtCommander.copyCompiled",
           "when": "view == dbtCommander.project && viewItem =~ /^model(-stg)?$/",
           "group": "3_inspect@2"
         },
         {
-          "command": "dbtCommander.showLineage",
-          "when": "view == dbtCommander.project && viewItem =~ /^(model|model-stg|seed|snapshot|sourceTable|exposure|semanticModel)$/",
-          "group": "3_inspect@4"
+          "command": "dbtCommander.preview",
+          "when": "view == dbtCommander.project && viewItem =~ /^model(-stg)?$/",
+          "group": "3_inspect@3"
         },
         {
           "command": "dbtCommander.showLineage",
-          "when": "view == dbtCommander.lineage && viewItem =~ /^lineage-/",
-          "group": "3_inspect@4"
-        },
-        {
-          "command": "dbtCommander.openInDocs",
           "when": "view == dbtCommander.project && viewItem =~ /^(model|model-stg|seed|snapshot|sourceTable|exposure|semanticModel)$/",
           "group": "3_inspect@5"
         },
         {
-          "command": "dbtCommander.openInDocs",
+          "command": "dbtCommander.showLineage",
           "when": "view == dbtCommander.lineage && viewItem =~ /^lineage-/",
           "group": "3_inspect@5"
+        },
+        {
+          "command": "dbtCommander.openInDocs",
+          "when": "view == dbtCommander.project && viewItem =~ /^(model|model-stg|seed|snapshot|sourceTable|exposure|semanticModel)$/",
+          "group": "3_inspect@6"
+        },
+        {
+          "command": "dbtCommander.openInDocs",
+          "when": "view == dbtCommander.lineage && viewItem =~ /^lineage-/",
+          "group": "3_inspect@6"
         },
         {
           "command": "dbtCommander.generateYaml",
@@ -775,24 +795,29 @@
           "group": "3_inspect@1"
         },
         {
+          "command": "dbtCommander.copyCompiled",
+          "when": "dbtCommander.isScratchpad || (resourceScheme == file && resourceExtname =~ /^\\.sql$/i && (resourcePath =~ /[\\\\/]models([\\\\/]|$)/i || resourcePath in dbtCommander.modelPaths) && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i)",
+          "group": "3_inspect@2"
+        },
+        {
           "command": "dbtCommander.preview",
           "when": "resourceScheme == file && resourceExtname =~ /^\\.sql$/i && (resourcePath =~ /[\\\\/]models([\\\\/]|$)/i || resourcePath in dbtCommander.modelPaths) && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i",
-          "group": "3_inspect@2"
+          "group": "3_inspect@3"
         },
         {
           "command": "dbtCommander.previewSelection",
           "when": "dbtCommander.isScratchpad || (resourceScheme == file && resourceExtname =~ /^\\.sql$/i && (resourcePath =~ /[\\\\/]models([\\\\/]|$)/i || resourcePath in dbtCommander.modelPaths) && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i)",
-          "group": "3_inspect@3"
+          "group": "3_inspect@4"
         },
         {
           "command": "dbtCommander.showLineage",
           "when": "resourceScheme == file && resourceExtname =~ /^\\.sql$/i && (resourcePath =~ /[\\\\/]models([\\\\/]|$)/i || resourcePath in dbtCommander.modelPaths) && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i",
-          "group": "3_inspect@4"
+          "group": "3_inspect@5"
         },
         {
           "command": "dbtCommander.openInDocs",
           "when": "resourceScheme == file && resourceExtname =~ /^\\.sql$/i && (resourcePath =~ /[\\\\/]models([\\\\/]|$)/i || resourcePath in dbtCommander.modelPaths) && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i",
-          "group": "3_inspect@5"
+          "group": "3_inspect@6"
         },
         {
           "command": "dbtCommander.generateYaml",
@@ -1056,6 +1081,18 @@
         "key": "ctrl+' c",
         "mac": "cmd+' c",
         "when": "resourceScheme == file && editorTextFocus && resourceExtname =~ /^\\.sql$/i && (resourcePath =~ /[\\\\/]models([\\\\/]|$)/i || resourcePath in dbtCommander.modelPaths) && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
+      },
+      {
+        "command": "dbtCommander.copyCompiled",
+        "key": "ctrl+' y",
+        "mac": "cmd+' y",
+        "when": "resourceScheme == file && editorTextFocus && resourceExtname =~ /^\\.sql$/i && (resourcePath =~ /[\\\\/]models([\\\\/]|$)/i || resourcePath in dbtCommander.modelPaths) && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
+      },
+      {
+        "command": "dbtCommander.copyCompiled",
+        "key": "ctrl+' y",
+        "mac": "cmd+' y",
+        "when": "editorTextFocus && dbtCommander.isScratchpad"
       },
       {
         "command": "dbtCommander.preview",

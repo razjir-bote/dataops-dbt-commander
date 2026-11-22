@@ -19,7 +19,7 @@ import {
   withGraph
 } from './dbt';
 import { SettingsPanel, detectDbtVersion } from './settingsPanel';
-import { dbtActivity } from './autoparseCore';
+import { dbtActivity, firstError } from './autoparseCore';
 import { DbtDiagnostics, killTree, lastRunOptions, runDbtTask } from './runner';
 import { listTargets, parseProjectFile, profilesDirCandidates } from './profiles';
 import { ShowResult, compiledPath } from './show';
@@ -41,7 +41,7 @@ import { RunStatusStore } from './runstatus';
 import { DbtLastRun } from './lastrun';
 import { MIGRATED_KEYS, Scope, plannedMigrations } from './migrate';
 import { EditDeps, addSeedsAsSource, checkConnection, createChangeKeyModel, createStagingModel, newModel, openInDocs, renameModel } from './projectedits';
-import { DbtCodeActions, QueryDeps, addColumnTests, newScratchpad, previewSelection, profileColumn, profileYamlColumn, runShow, trackScratchpads } from './query';
+import { DbtCodeActions, QueryDeps, addColumnTests, copyCompiled, newScratchpad, previewSelection, profileColumn, profileYamlColumn, runShow, trackScratchpads } from './query';
 import { loadCatalog } from './hover';
 import { PreviewPanel } from './previewPanel';
 
@@ -559,7 +559,42 @@ async function previewModel(uri?: vscode.Uri): Promise<void> {
 
 let dbtVersion: string | undefined;
 
+/** A captured dbt compile's failure: undefined when cancelled, else dbt's error line. */
+function compileError(r: { stdout: string; stderr: string; error?: Error & { killed?: boolean } }): string | undefined {
+  if (r.error?.message === 'cancelled' || r.error?.killed) {
+    return undefined;
+  }
+  // (Not error.message as a fallback: it repeats the whole command line, inline SQL included.)
+  return firstError(cleanOutput(`${r.stdout}\n${r.stderr}`) || 'dbt exited with an error');
+}
+
 const queryDeps: QueryDeps = {
+  compileModel: async (exe, root, file) => {
+    const args = [...buildArgs('compile', [modelSelector(root, file)], cfg().get<string>('target', ''), cfg().get<string>('extraArgs', '')), '--quiet'];
+    const project = readProject(root);
+    const compiled = compiledPath(root, project.name ?? path.basename(root), project.targetPath, file);
+    const started = Date.now();
+    const r = await captureDbt(exe, args, root, `dbt compile ${modelName(file)}`);
+    if (r.error) {
+      return { error: compileError(r) };
+    }
+    try {
+      // Written by this compile, not left by an earlier one (a disabled model compiles nothing and exits 0).
+      if (fs.statSync(compiled).mtimeMs < started - 2000) {
+        return { error: `dbt didn't compile it (is the model disabled?) — ${cleanOutput(r.stdout).split('\n').pop() ?? ''}`.trim() };
+      }
+      return { sql: fs.readFileSync(compiled, 'utf8') };
+    } catch {
+      return { error: `the compiled file isn't at ${compiled} (a --target-path in the extra flags isn't followed)` };
+    }
+  },
+  compileInline: async (exe, root, sql, label) => {
+    const args = [...buildArgs('compile', [], cfg().get<string>('target', ''), cfg().get<string>('extraArgs', '')), '--inline', sql, '--quiet'];
+    const r = await captureDbt(exe, args, root, `dbt compile ${label}`);
+    // --quiet: stdout is the compiled SQL. Without it (log flags in the extra flags), drop the log lines and header.
+    const out = r.stdout.includes('Compiled inline node is:') ? r.stdout.slice(r.stdout.lastIndexOf('Compiled inline node is:') + 24) : r.stdout;
+    return r.error ? { error: compileError(r) } : { sql: out.replace(/^\s*\n/, '') };
+  },
   requireExe,
   pickProjectRoot: () => pickProjectRoot(true),
   projectRootOf: file => languageDeps.projectRootOf(file),
@@ -862,6 +897,8 @@ export interface DbtRunnerApi {
   query: {
     newScratchpad(root: string): Promise<vscode.TextEditor | undefined>;
     previewSelection(editor: vscode.TextEditor): Promise<ShowResult | undefined>;
+    /** Copy Compiled SQL (resolves with what was copied). */
+    copyCompiled(target?: vscode.Uri): Promise<string | undefined>;
     addColumnTests(uri: vscode.Uri, line: number, tests: TestSpec[]): Promise<boolean>;
     profileYamlColumn(uri: vscode.Uri, line: number): Promise<ShowResult | undefined>;
     /** Rows held by the preview panel and what Copy / Save CSV would write for a view state. */
@@ -887,7 +924,9 @@ function captureDbt(exe: string, args: string[], cwd: string, title: string): Pr
               try {
                 const child = execFile(exe, args, { cwd, maxBuffer: 16 * 1024 * 1024, windowsHide: true, env: { ...process.env, PYTHONIOENCODING: 'utf-8' } }, (err, stdout, stderr) => {
                   endActivity(err ? 1 : 0);
-                  resolve({ stdout, stderr, ...(err ? { error: err } : {}) });
+                  // Cancelled (the process tree was killed — on Windows `err.killed` stays false): say so plainly.
+                  const error = err && token.isCancellationRequested ? new Error('cancelled') : err;
+                  resolve({ stdout, stderr, ...(error ? { error } : {}) });
                 });
                 token.onCancellationRequested(() => killTree(child));
               } catch (e) {
@@ -959,6 +998,10 @@ export function activate(ctx: vscode.ExtensionContext): DbtRunnerApi {
     targetItem,
     diagnostics,
     vscode.commands.registerCommand('dbtCommander.compile', (uri?: vscode.Uri) => compileModel(uri)),
+    // From the Explorer / editor menus: a Uri; from the sidebar: a tree item with its resourceUri.
+    vscode.commands.registerCommand('dbtCommander.copyCompiled', (arg?: vscode.Uri | { resourceUri?: vscode.Uri }) =>
+      copyCompiled(queryDeps, arg instanceof vscode.Uri ? arg : arg?.resourceUri)
+    ),
     vscode.commands.registerCommand('dbtCommander.seedFiles', (uri?: vscode.Uri, uris?: vscode.Uri[]) => seedFiles(uri, uris)),
     vscode.commands.registerCommand('dbtCommander.generateYaml', (uri?: vscode.Uri) => generateYaml(uri)),
     vscode.commands.registerCommand('dbtCommander.preview', (uri?: vscode.Uri) => previewModel(uri)),
@@ -1191,6 +1234,7 @@ export function activate(ctx: vscode.ExtensionContext): DbtRunnerApi {
     query: {
       newScratchpad: root => newScratchpad(queryDeps, root),
       previewSelection: editor => previewSelection(queryDeps, editor),
+      copyCompiled: target => copyCompiled(queryDeps, target),
       addColumnTests: (uri, line, tests) => addColumnTests(queryDeps, uri, line, tests),
       profileYamlColumn: (uri, line) => profileYamlColumn(queryDeps, uri, line),
       previewData: () => PreviewPanel.active?.data

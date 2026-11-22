@@ -1477,5 +1477,41 @@ exports.run = async () => {
     }
   });
 
+  await step('copy compiled SQL: a model, a selected CTE, a scratchpad; a compile error leaves the clipboard alone', async () => {
+    const clip = () => vscode.env.clipboard.readText();
+    await closeAll();
+    // A model picked in the Explorer / sidebar (not open): dbt compile --select, its compiled file.
+    const model = await api.query.copyCompiled(uri('models', 'c.sql'));
+    assert.ok(model, 'nothing copied');
+    assert.equal(await clip(), model);
+    assert.match(model, /from "demo"\."main"\."b"/i, model);
+    assert.doesNotMatch(model, /\{\{/);
+    // Not a model (a macro file, even open in the editor): nothing compiled, nothing copied.
+    await vscode.window.showTextDocument(uri('macros', 'money.sql'));
+    assert.equal(await api.query.copyCompiled(uri('macros', 'money.sql')), undefined);
+    assert.equal(await clip(), model);
+    await closeAll();
+    const ed = await api.query.newScratchpad(root);
+    try {
+      await ed.edit(e => e.replace(new vscode.Range(0, 0, ed.document.lineCount, 0), "with a as (select * from {{ ref('b') }}),\nz as (select 1 as q)\nselect * from z\n"));
+      // The first CTE with its comma: compiled, selecting from it.
+      ed.selection = new vscode.Selection(0, 0, 0, 41);
+      const cte = await api.query.copyCompiled();
+      assert.ok(cte && cte === (await clip()), String(cte));
+      assert.match(cte, /^with a as \(select \* from "demo"\."main"\."b"\),\s*z as \(select 1 as q\)\s*select \* from a\s*$/i, cte);
+      // No selection in a scratchpad: the whole query.
+      ed.selection = new vscode.Selection(2, 0, 2, 0);
+      assert.match(await api.query.copyCompiled(), /select \* from z\s*$/);
+      // A compile error: nothing copied, the clipboard keeps what it had.
+      await vscode.env.clipboard.writeText('keep me');
+      await ed.edit(e => e.replace(new vscode.Range(0, 0, ed.document.lineCount, 0), "select * from {{ ref('nope') }}\n"));
+      assert.equal(await api.query.copyCompiled(), undefined);
+      assert.equal(await clip(), 'keep me');
+    } finally {
+      await vscode.commands.executeCommand('workbench.action.revertAndCloseActiveEditor');
+      await closeAll();
+    }
+  });
+
   fs.writeFileSync(process.env.ITEST_OUT, out.join('\n'));
 };

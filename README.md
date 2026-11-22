@@ -10,7 +10,7 @@ Supports dbt-core 1.x (tested with 1.12); not dbt 2 / Fusion.
 - **One right-click list.** Everything dbt is under **dbt ▸** when you right-click a model, seed CSV or folder in
   the Explorer, an editor tab, or inside the code editor; the dbt sidebar and Lineage view show the same list
   directly. Same groups, same order everywhere, only what applies: Run · Build · Test · Seed · Snapshot · Run Test |
-  Build + Upstream / + Downstream / + Upstream & Downstream | Compile · Preview Data · Preview Selection / CTE ·
+  Build + Upstream / + Downstream / + Upstream & Downstream | Compile · Copy Compiled SQL · Preview Data · Preview Selection / CTE ·
   Show Lineage · Open in dbt Docs | Generate YAML · New Model… · Create Staging Model · Create SCD2 Models and Gates
   Test… · Add Seed as Source… | Rename Model… | SQLFluff: Lint File · Fix File | Open Settings.
 - **Right-click models or folders** under `models/` → **dbt** → Run / Build / Test.
@@ -25,6 +25,10 @@ Supports dbt-core 1.x (tested with 1.12); not dbt 2 / Fusion.
 - **Keyboard shortcuts** (while a model is open): `Ctrl+'` then
   `B` build · `R` run · `T` test · `C` compile · `P` preview · `Q` preview selection / CTE.
 - **Compile** opens the compiled SQL beside the model.
+- **Copy Compiled SQL** (`Ctrl+'` then `Y`, or right-click) — puts the compiled SQL on the clipboard, ready to paste into
+  the Synapse / Databricks SQL editor: of the same thing Preview Selection / CTE would run (a selection, the CTE
+  under the cursor with the CTEs before it, a scratchpad), or of the whole model (`dbt compile --select`, exactly what
+  dbt runs). **Open** in the notification shows it in a new tab. A compile error copies nothing.
 - **Preview Data** runs `dbt show` and shows the rows in a table (limit: `dbtCommander.previewLimit`, default 100).
   Click a header to sort, type in the filter box to narrow the rows, then **Copy** (tab-separated, pastes into
   Excel / Sheets) or **Save CSV…** — both take the rows as shown (text that a spreadsheet would run as a formula,

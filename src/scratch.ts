@@ -180,6 +180,30 @@ export function cteQueryAt(sql: string, offset: number): { name: string; sql: st
   return { name: cte.name, sql: `${sql.slice(0, last.end)}${jinja}\nselect * from ${cte.name}` };
 }
 
+export type QueryPick = { kind: 'sql'; sql: string; suffix: string } | { kind: 'model' };
+
+/**
+ * What Preview Selection / CTE and Copy Compiled SQL work on, from the editor text and its selection (offsets):
+ * whole CTEs selected → the last one with the model's CTEs; any other selection → as is; no selection, cursor in a
+ * CTE → that CTE; a saved model otherwise → the model node itself (`kind: 'model'`); unsaved model / any other file →
+ * the whole text. `suffix` goes after the model / query name in titles.
+ */
+export function pickQuery(text: string, sel: { start: number; end: number; cursor: number }, ctx: { isModel: boolean; isDirty: boolean }): QueryPick {
+  const selected = text.slice(sel.start, sel.end);
+  if (selected.trim()) {
+    const ctes = selectedCteQuery(text, sel.start, sel.end) ?? trailingCteQuery(selected);
+    return ctes ? { kind: 'sql', sql: ctes.sql, suffix: ` › ${ctes.name}` } : { kind: 'sql', sql: selected, suffix: ' (selection)' };
+  }
+  if (!ctx.isModel) {
+    return { kind: 'sql', sql: text, suffix: '' };
+  }
+  const cte = cteQueryAt(text, sel.cursor);
+  if (cte) {
+    return { kind: 'sql', sql: cte.sql, suffix: ` › ${cte.name}` };
+  }
+  return ctx.isDirty ? { kind: 'sql', sql: text, suffix: ' (unsaved)' } : { kind: 'model' };
+}
+
 /**
  * A selection (offsets into the model) that is whole CTEs — from a CTE's name (or the `with`) to a CTE's closing
  * bracket (or the comma after it), whitespace and comments around it ignored — as a query selecting from the last
