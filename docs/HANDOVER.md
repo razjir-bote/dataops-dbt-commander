@@ -14,6 +14,10 @@ Since v0.9.0 the extension ID is `local.dataops-dbt-commander` and every command
 is `dbtCommander.*`; `migrate.ts` copies old `dbtRunner.*` user and workspace settings once on activation.
 
 ## Status
+- **v0.16 (unreleased): Preview Selection / CTE on a selection ending in a comma** selects from the last CTE
+  selected: `trailingCteQuery` in `scratch.ts` (comma found with the comment / string / Jinja-aware tokenizer; the
+  selection minus the comma must end exactly at a CTE found by `ctesIn`, retried with `with ` prefixed for CTEs
+  selected from the middle; Jinja tags after the comma kept). Used first in `previewSelection` (query.ts).
 - **v0.16 (unreleased): one right-click list.** `package.json` menus: Explorer + editor tab → submenu
   `dbtCommander.submenu`, code editor → `dbtCommander.editorSubmenu` (both labelled `dbt`; nothing loose in VS Code's
   menus — seed CSVs and YAML included); sidebar / Lineage view items use the same groups `1_run` · `2_graph` ·
@@ -174,7 +178,7 @@ npm run package              # esbuild → dist/extension.js, then vsce → .vsi
   `npm run test:integration:serial` (or `--serial`) runs every step in one VS Code, in order, as before.
   Groups are lists of suite sections (`await section('v08')`) in `groups.js`; every group after the first starts with
   a setup step (seed, build, docs generate) standing in for what earlier steps left behind. A new step goes in a
-  section; a new section must be added to a group. Rebalance with the step times. Currently 73 checks (+ 3 setup
+  section; a new section must be added to a group. Rebalance with the step times. Currently 74 checks (+ 3 setup
   steps in parallel runs). The suite talks to the extension through the API returned by `activate()`.
 - **CI** (`.github/workflows/ci.yml`): windows-latest, Node 22, Python 3.12; typecheck, unit, integration,
   package. A pushed tag `vX.Y.Z` that equals `package.json` version publishes a GitHub release with the vsix.

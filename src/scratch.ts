@@ -180,6 +180,37 @@ export function cteQueryAt(sql: string, offset: number): { name: string; sql: st
   return { name: cte.name, sql: `${sql.slice(0, last.end)}${jinja}\nselect * from ${cte.name}` };
 }
 
+/**
+ * A selection of CTEs ending in a comma (`with a as (…), b as (…),`) — not runnable as it is — as a query selecting
+ * from its last CTE. The `with` may be left out (CTEs selected from the middle of a model). Jinja tags after the
+ * comma (e.g. the `{% endif %}` closing the last CTE) are kept; comments are dropped. Undefined for anything else.
+ */
+export function trailingCteQuery(selected: string): { name: string; sql: string } | undefined {
+  const toks = tokens(selected, DIALECTS[0]);
+  const comma = toks[toks.length - 1];
+  if (comma?.kind !== 'comma') {
+    return undefined;
+  }
+  const body = selected.slice(0, comma.start).trimEnd();
+  const endsAtCte = (text: string) => {
+    const ctes = ctesIn(text);
+    const last = ctes[ctes.length - 1];
+    const lastTok = tokens(text, DIALECTS[0]).pop();
+    return last && lastTok && lastTok.end === last.end ? last : undefined;
+  };
+  let text = body;
+  let last = endsAtCte(text);
+  if (!last) {
+    text = `with ${body}`;
+    last = endsAtCte(text);
+  }
+  if (!last) {
+    return undefined;
+  }
+  const tags = (selected.slice(comma.end).match(/\{%[\s\S]*?%\}|\{#[\s\S]*?#\}/g) ?? []).map(t => `\n${t}`).join('');
+  return { name: last.name, sql: `${text}${tags}\nselect * from ${last.name}` };
+}
+
 /** SQL ready for `dbt show --inline`: without `config()` blocks or a trailing semicolon (and comments after it). */
 export function inlineSql(sql: string): string {
   return sql

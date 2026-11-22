@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { execFile } from 'child_process';
-import { cteQueryAt, inlineSql } from './scratch';
+import { cteQueryAt, inlineSql, trailingCteQuery } from './scratch';
 import { dbtActivity } from './autoparseCore';
 import { ShowResult, parseShowOutput } from './show';
 import { PreviewOptions, PreviewPanel } from './previewPanel';
@@ -154,7 +154,12 @@ export async function previewSelection(deps: QueryDeps, editor = vscode.window.a
   const base = isModel ? path.basename(doc.uri.fsPath, path.extname(doc.uri.fsPath)) : 'Query';
   let sql: string;
   let title: string;
-  if (selected.trim()) {
+  const trailing = selected.trim() ? trailingCteQuery(selected) : undefined;
+  if (trailing) {
+    // `with a as (…), b as (…),` — preview the last CTE selected.
+    sql = trailing.sql;
+    title = `${base} › ${trailing.name}`;
+  } else if (selected.trim()) {
     sql = selected;
     title = `${base} (selection)`;
   } else if (isModel) {

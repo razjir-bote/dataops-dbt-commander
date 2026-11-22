@@ -1441,5 +1441,32 @@ exports.run = async () => {
     }
   });
 
+  await step('preview selection ending in a comma: selects from the last CTE selected', async () => {
+    const ed = await api.query.newScratchpad(root);
+    try {
+      const sql = [
+        'with first_cte as (',
+        "  select 1 as n from {{ ref('b') }}",
+        '),',
+        'second_cte as (',
+        '  select n + 1 as n from first_cte',
+        '),',
+        'third_cte as (select n + 1 as n from second_cte)',
+        'select * from third_cte',
+        ''
+      ].join('\n');
+      await ed.edit(e => e.replace(new vscode.Range(0, 0, ed.document.lineCount, 0), sql));
+      // From the top through the comma after second_cte.
+      ed.selection = new vscode.Selection(0, 0, 5, 2);
+      const r = await api.query.previewSelection(ed);
+      assert.deepEqual(r && r.rows, [{ n: 2 }], JSON.stringify(r));
+      // Just first_cte, with its comma.
+      ed.selection = new vscode.Selection(0, 0, 2, 2);
+      assert.deepEqual((await api.query.previewSelection(ed)).rows, [{ n: 1 }]);
+    } finally {
+      await vscode.commands.executeCommand('workbench.action.revertAndCloseActiveEditor');
+    }
+  });
+
   fs.writeFileSync(process.env.ITEST_OUT, out.join('\n'));
 };
