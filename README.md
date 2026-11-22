@@ -7,19 +7,25 @@ Supports dbt-core 1.x (tested with 1.12); not dbt 2 / Fusion.
 
 ## Features
 
+- **One right-click list.** Everything dbt is under **dbt ▸** when you right-click a model, seed CSV or folder in
+  the Explorer, an editor tab, or inside the code editor; the dbt sidebar and Lineage view show the same list
+  directly. Same groups, same order everywhere, only what applies: Run · Build · Test · Seed · Snapshot · Run Test |
+  Build + Upstream / + Downstream / + Upstream & Downstream | Compile · Preview Data · Preview Selection / CTE ·
+  Show Lineage · Open in dbt Docs | Generate YAML · New Model… · Create Staging Model · Create SCD2 Models and Gates
+  Test… · Add Seed as Source… | Rename Model… | SQLFluff: Lint File · Fix File | Open Settings.
 - **Right-click models or folders** under `models/` → **dbt** → Run / Build / Test.
   Multi-select works; folders run everything inside (`--select path:models/staging`).
 - **Right-click any folder** in your dbt project → **dbt** → **Build** or **Seed** runs on everything inside it,
   subfolders included (`--select path:seeds/ref`). Right-clicking the project folder itself builds / seeds the
   whole project. Folders under `models/` also offer Run and Test.
-- **Right-click seed CSVs** under `seeds/` (or its subfolders) → **dbt Seed** loads just those seeds
+- **Right-click seed CSVs** under `seeds/` (or its subfolders) → **dbt ▸ Seed** loads just those seeds
   (`--select path:seeds/ref/countries.csv`). Multi-select works, and open seed CSVs get a ▶ seed button.
 - **Build + Upstream / + Downstream / + Upstream & Downstream** for a model (`+model`, `model+`, `+model+`).
 - **▶ in the editor title** builds the open model. Unsaved changes are saved first.
 - **Keyboard shortcuts** (while a model is open): `Ctrl+'` then
   `B` build · `R` run · `T` test · `C` compile · `P` preview · `Q` preview selection / CTE.
-- **dbt Compile** opens the compiled SQL beside the model.
-- **dbt Preview Data** runs `dbt show` and shows the rows in a table (limit: `dbtCommander.previewLimit`, default 100).
+- **Compile** opens the compiled SQL beside the model.
+- **Preview Data** runs `dbt show` and shows the rows in a table (limit: `dbtCommander.previewLimit`, default 100).
   Click a header to sort, type in the filter box to narrow the rows, then **Copy** (tab-separated, pastes into
   Excel / Sheets) or **Save CSV…** — both take the rows as shown (text that a spreadsheet would run as a formula,
   like `=…`, is exported with a leading `'`). **Σ** on a header profiles that column.
@@ -37,13 +43,13 @@ Supports dbt-core 1.x (tested with 1.12); not dbt 2 / Fusion.
 - **Go to definition for macros** — Ctrl+click a macro call inside `{{ }}` / `{% %}` (`{{ cents_to_dollars('x') }}`,
   `{{ dbt_utils.star(...) }}`, `{{ dbt.current_timestamp() }}`) to open it — your project's macros, installed
   packages, and dbt's own / adapter macros inside your venv.
-- **dbt Generate YAML** — right-click a model (or use the sidebar) to write its `models:` entry with every column
+- **Generate YAML** — right-click a model (or use the sidebar) to write its `models:` entry with every column
   and its data type, read from the warehouse through dbt (the model must be built; you're offered *Build & retry*).
   It adds only missing columns to an existing entry, otherwise appends to a `.yml` in the model's folder, otherwise
   creates `<model>.yml`. Existing lines are left untouched and the change is left unsaved for you to review.
 - **dbt sidebar** — the dbt icon in the Activity Bar shows Models and Seeds (by folder), Sources, Snapshots and
   Tests (by model), with run / build / test / seed / snapshot buttons on items, **folders and whole sections**, and
-  Compile / Preview / Generate YAML / Show lineage on right-click. **Ctrl/Shift-click** to select several models,
+  the rest of the list on right-click. **Ctrl/Shift-click** to select several models,
   seeds, folders, tests or snapshots, then use a button or right-click: they run as one dbt command. Right-click
   also offers **Build + Upstream / + Downstream / + Upstream & Downstream** for the selection (folders included).
 - **Auto-parse** — saving, adding or deleting models, YAML, seeds, snapshots, macros or tests (or editing
@@ -53,7 +59,7 @@ Supports dbt-core 1.x (tested with 1.12); not dbt 2 / Fusion.
   failed` in the status bar (click for dbt's output). `dbtCommander.autoParse` (on by default, or the settings page).
 - **Lineage** — a view under Project shows the open model's **upstream** (models, seeds, snapshots, sources) and
   **downstream** (models, snapshots, exposures), each expandable level by level; click to open, Build on models.
-  It follows the active editor; *Show lineage* pins it to a node until you press *Follow active editor* — on a
+  It follows the active editor; *Show Lineage* pins it to a node until you press *Follow Active Editor* — on a
   model, seed, snapshot, **source table, exposure or semantic model** in the dbt sidebar (to see what an exposure
   depends on), or on any item in the Lineage panel to re-centre on it.
 
@@ -73,10 +79,10 @@ Supports dbt-core 1.x (tested with 1.12); not dbt 2 / Fusion.
 - **Find references** — Shift+F12 on `ref('orders')` or in `orders.sql` lists everything that refs it.
 - **Custom folders** — `model-paths`, `seed-paths`, `snapshot-paths` and `packages-install-path` from
   `dbt_project.yml` are respected by menus, links and navigation.
-- **dbt Rename model…** (right-click a model) — renames the file, every `ref()` to it (models, snapshots,
+- **Rename Model…** (right-click a model) — renames the file, every `ref()` to it (models, snapshots,
   analyses, tests, macros, YAML) and its `models:` / `unit_tests:` YAML entries, shown first in VS Code's refactor
   preview. Versioned models and per-model settings in `dbt_project.yml` are not renamed.
-- **dbt Create staging model** (right-click a source table in the sidebar, on a `source()` call, or in a table's entry
+- **Create Staging Model** (right-click a source table in the sidebar, on a `source()` call, or in a table's entry
   under `sources:` in YAML — also a lightbulb on that entry) — creates
   `stg_<system>__<entity>.sql` (the table name split at its first underscore: `ace_aus_accounttag_account` →
   `stg_ace__aus_accounttag_account`, in `models/staging/ace/`) in the bronze → staging pattern (T-SQL / Synapse) from the table's columns (read from
@@ -84,11 +90,11 @@ Supports dbt-core 1.x (tested with 1.12); not dbt 2 / Fusion.
   DATETIME2, `_date` → DATE, else NVARCHAR(4000)); the `Id` column kept and copied to `entity_id`; the newest load
   kept per `_landing_extract_date` + `entity_id` (no key: per every column not starting with `_`); rows with
   `IsDelete` other than false / 0 dropped. Every rule is a `dbtCommander.bronzeStaging.*` setting.
-- **dbt Add seed as source…** (right-click seed CSVs in the Explorer or the dbt sidebar) — adds them as tables of a
+- **Add Seed as Source…** (right-click seed CSVs in the Explorer or the dbt sidebar) — adds them as tables of a
   source (default `bronze`) in `models/staging/<source>/_<source>__sources.yml`, pointing at the seeds' tables
   (schema from the manifest), with the CSV header as columns — so `source('bronze', '<seed>')` and *Create
   staging model* work on sample data. Existing entries are left alone; run *dbt seed* to load the tables.
-- **dbt Create SCD2 models…** (right-click a `stg_` model in the Explorer, sidebar or editor) — creates the rest of
+- **Create SCD2 Models and Gates Test…** (right-click a `stg_` model in the Explorer, sidebar or editor) — creates the rest of
   the chain in `models/intermediate/scd2/generated/` (`dim_<source>__<entity>__candidate` / `__history` /
   `__published`, each one line calling your project's `scd2_candidate` / `scd2_history` / `scd2_published` macro),
   the singular test `tests/scd2/generated/dim_<source>__<entity>__gates.sql` (calling `scd2_gate_test`) — existing
@@ -100,9 +106,9 @@ Supports dbt-core 1.x (tested with 1.12); not dbt 2 / Fusion.
   `macros/hash_columns.sql` when needed (never overwritten): it hashes each column, then groups of 250 column
   hashes, so `HASHBYTES` never gets more than 8000 bytes (Synapse) however wide the table. Settings:
   `dbtCommander.scd2.*`.
-- **dbt New model…** (right-click a model folder) — creates a model from a template (`dbtCommander.newModelTemplate`,
+- **New Model…** (right-click a model folder) — creates a model from a template (`dbtCommander.newModelTemplate`,
   `{{name}}` placeholder) with a YAML entry.
-- **Open in dbt docs** — jumps to a model's / source's / seed's / exposure's page in the static docs site
+- **Open in dbt Docs** — jumps to a model's / source's / seed's / exposure's page in the static docs site
   (generated on first use).
 - **Exposures and semantic models** in the sidebar and in Lineage.
 - **Check connection (dbt debug)** in the status bar menu.
@@ -110,7 +116,7 @@ Supports dbt-core 1.x (tested with 1.12); not dbt 2 / Fusion.
   `dbt-scratch-N.sql` for a project. **Ctrl+Enter** runs the query, or just the selection, through
   `dbt show --inline`, so `ref()`, `source()`, macros and the active target work; rows open in the preview table.
   Autocomplete and hovers work there too.
-- **Preview a selection or a CTE** — in a model, `Ctrl+'` then `Q` (or right-click → *dbt Preview Selection / CTE*)
+- **Preview a selection or a CTE** — in a model, `Ctrl+'` then `Q` (or right-click → *dbt ▸ Preview Selection / CTE*)
   previews the selected SQL; with no selection, the CTE under the cursor; elsewhere, the whole model. It uses the
   editor's text, unsaved edits included, without saving the file.
 - **Add tests from YAML** — the lightbulb on a model column in YAML (`- name: id` under `columns:`) adds

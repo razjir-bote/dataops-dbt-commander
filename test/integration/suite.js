@@ -849,7 +849,10 @@ exports.run = async () => {
 
   await step('seed menu shows for seed CSVs only', async () => {
     const pkg = require(path.resolve(__dirname, '..', '..', 'package.json'));
-    const when = pkg.contributes.menus['explorer/context'].find(m => m.command === 'dbtCommander.seedFiles').when;
+    // The dbt submenu opens on seed CSVs through its CSV clause (and offers Seed there).
+    const menu = pkg.contributes.menus['explorer/context'].find(m => m.submenu === 'dbtCommander.submenu').when;
+    const when = menu.split(') || (').find(part => part.includes('csv'));
+    assert.ok(pkg.contributes.menus['dbtCommander.submenu'].some(m => m.command === 'dbtCommander.seedFiles' && /csv/.test(m.when)));
     const [ext, inSeeds, excluded] = [...when.matchAll(/=~ \/(.+?)\/i/g)].map(m => new RegExp(m[1], 'i'));
     const shows = p => ext.test(path.extname(p)) && inSeeds.test(p) && !excluded.test(p);
     assert.ok(shows(file('seeds', 's.csv')) && shows(file('seeds', 'ref', 'countries.csv')));
