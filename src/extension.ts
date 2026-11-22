@@ -19,11 +19,14 @@ import {
   withGraph
 } from './dbt';
 import { SettingsPanel, detectDbtVersion } from './settingsPanel';
+import { dbtActivity } from './autoparseCore';
 import { DbtDiagnostics, killTree, lastRunOptions, runDbtTask } from './runner';
 import { listTargets, parseProjectFile, profilesDirCandidates } from './profiles';
 import { ShowResult, compiledPath } from './show';
 import { fileFor } from './manifest';
 import { SqlFluff } from './sqlfluffRunner';
+import { AutoParser } from './autoparse';
+import { debugArgs } from './scaffold';
 import { DbtYamlCompletionProvider } from './yamlCompletion';
 import { TestSpec } from './yamlfix';
 import { LanguageDeps, clearManifestCache, inProjectPaths, loadManifest, registerLanguageFeatures } from './language';
@@ -853,6 +856,8 @@ export interface DbtRunnerApi {
   };
   /** Optional SQLFluff linting (off by default). */
   sqlfluff: SqlFluff;
+  /** Background dbt parse when project files change (dbtCommander.autoParse, on by default). */
+  autoParse: AutoParser;
   /** v0.10: scratchpads, previews of a selection / CTE (resolve with the rows), YAML test quick fixes. */
   query: {
     newScratchpad(root: string): Promise<vscode.TextEditor | undefined>;
@@ -873,12 +878,24 @@ function runCaptured(exe: string, args: string[], cwd: string, title: string): P
 function captureDbt(exe: string, args: string[], cwd: string, title: string): Promise<{ stdout: string; stderr: string; error?: Error }> {
   return Promise.resolve(
     vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title, cancellable: true }, (_p, token) =>
-      new Promise<{ stdout: string; stderr: string; error?: Error }>(resolve => {
-        const child = execFile(exe, args, { cwd, maxBuffer: 16 * 1024 * 1024, windowsHide: true, env: { ...process.env, PYTHONIOENCODING: 'utf-8' } }, (err, stdout, stderr) =>
-          resolve({ stdout, stderr, ...(err ? { error: err } : {}) })
-        );
-        token.onCancellationRequested(() => killTree(child));
-      })
+      // After a background dbt parse, if one runs (cancel works while waiting too).
+      dbtActivity.whenIdleUnless(cwd, 'auto', token).then(idle =>
+        !idle
+          ? { stdout: '', stderr: '', error: new Error('cancelled') }
+          : new Promise<{ stdout: string; stderr: string; error?: Error }>(resolve => {
+              const endActivity = dbtActivity.begin(cwd, 'user', args);
+              try {
+                const child = execFile(exe, args, { cwd, maxBuffer: 16 * 1024 * 1024, windowsHide: true, env: { ...process.env, PYTHONIOENCODING: 'utf-8' } }, (err, stdout, stderr) => {
+                  endActivity(err ? 1 : 0);
+                  resolve({ stdout, stderr, ...(err ? { error: err } : {}) });
+                });
+                token.onCancellationRequested(() => killTree(child));
+              } catch (e) {
+                endActivity();
+                resolve({ stdout: '', stderr: '', error: e instanceof Error ? e : new Error(String(e)) });
+              }
+            })
+      )
     )
   );
 }
@@ -1005,6 +1022,16 @@ export function activate(ctx: vscode.ExtensionContext): DbtRunnerApi {
     adapterType: async root => (await loadManifest(languageDeps, root))?.adapterType
   });
   ctx.subscriptions.push(sqlfluff);
+
+  // dbt parse in the background when files dbt reads change: the manifest (sidebar, lineage, completion) keeps up.
+  const autoParse = new AutoParser({
+    projectRootOf: file => languageDeps.projectRootOf(file),
+    pathsOf: root => pathsOf(root),
+    exe: () => (vscode.workspace.isTrusted ? dbtExecutable(cfg().get<string>('venvPath', ''), exists) : undefined),
+    // Only the extra flags parse accepts (--profiles-dir, --vars, …): run flags like --full-refresh would fail it.
+    flags: () => debugArgs(cfg().get<string>('target', ''), cfg().get<string>('extraArgs', ''))
+  });
+  ctx.subscriptions.push(autoParse);
 
   const lastRunView = new DbtLastRun(languageDeps, runStatus);
   lastRunView.view = vscode.window.createTreeView('dbtCommander.lastRun', { treeDataProvider: lastRunView });
@@ -1160,6 +1187,7 @@ export function activate(ctx: vscode.ExtensionContext): DbtRunnerApi {
       newModel: (folder, name) => newModel(edits, folder, name)
     },
     sqlfluff,
+    autoParse,
     query: {
       newScratchpad: root => newScratchpad(queryDeps, root),
       previewSelection: editor => previewSelection(queryDeps, editor),

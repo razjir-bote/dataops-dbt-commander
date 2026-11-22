@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { spawn } from 'child_process';
 import { LanguageDeps, loadManifest } from './language';
+import { dbtActivity } from './autoparseCore';
 import { NodeEntry } from './manifest';
 import { DbtDiagnostics, killTree } from './runner';
 import { RunResult, acceptResults, batchSelectors, invocationOf, testLine } from './runresults';
@@ -238,9 +239,21 @@ export class DbtTests implements vscode.Disposable {
     run: vscode.TestRun,
     token: vscode.CancellationToken
   ): Promise<{ code: number | undefined; output: string }> {
-    return new Promise(resolve => {
+    // After a background dbt parse, if one runs (cancel works while waiting too).
+    if (dbtActivity.busy(cwd, 'auto')) {
+      run.appendOutput('Waiting for the background dbt parse to finish…\r\n');
+    }
+    return dbtActivity.whenIdleUnless(cwd, 'auto', token).then(idle => !idle ? { code: undefined, output: '' } : new Promise<{ code: number | undefined; output: string }>(resolve => {
       let output = '';
-      const child = spawn(exe, args, { cwd, windowsHide: true, env: { ...process.env, PYTHONIOENCODING: 'utf-8' } });
+      const endActivity = dbtActivity.begin(cwd, 'user', args);
+      let child: ReturnType<typeof spawn>;
+      try {
+        child = spawn(exe, args, { cwd, windowsHide: true, env: { ...process.env, PYTHONIOENCODING: 'utf-8' } });
+      } catch (e) {
+        endActivity();
+        resolve({ code: undefined, output: `Failed to start dbt: ${e instanceof Error ? e.message : String(e)}\n` });
+        return;
+      }
       const onData = (text: string) => {
         output += text;
         run.appendOutput(text.replace(/\r?\n/g, '\r\n'));
@@ -250,6 +263,7 @@ export class DbtTests implements vscode.Disposable {
       const sub = token.onCancellationRequested(() => killTree(child));
       let done = false;
       const finish = (code: number | undefined) => {
+        endActivity(code);
         if (!done) {
           done = true;
           sub.dispose();
@@ -261,7 +275,7 @@ export class DbtTests implements vscode.Disposable {
         finish(undefined);
       });
       child.on('close', code => finish(code ?? undefined));
-    });
+    }));
   }
 
   dispose(): void {

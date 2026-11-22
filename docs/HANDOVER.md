@@ -1,7 +1,7 @@
 # DataOps dbt Commander — developer handover
 
 Keep this file current: update it in the same commit as any change to features, architecture, build/release
-process, or known issues. Last updated: 2026-11-21 (v0.15.0 released).
+process, or known issues. Last updated: 2026-11-22 (v0.15.0 released; v0.16 auto-parse implemented, not committed).
 
 ## What this is
 A VS Code extension (TypeScript) for working with **dbt-core 1.x** (tested with 1.12.7) on **Windows**, running
@@ -14,6 +14,19 @@ Since v0.9.0 the extension ID is `local.dataops-dbt-commander` and every command
 is `dbtCommander.*`; `migrate.ts` copies old `dbtRunner.*` user and workspace settings once on activation.
 
 ## Status
+- **v0.16 (unreleased): auto-parse.** `autoparseCore.ts` (pure: `parseTrigger(rel, paths)`; `DbtActivity` — the
+  one registry (`dbtActivity`) of dbt processes per project, `'auto'` or `'user'`; `ParseScheduler` — 1.5 s debounce
+  per project, one parse at a time + one queued, waits while any dbt runs in the project, a user command that
+  parses, exits 0 and started after the last change cancels the pending parse and clears a failure) and
+  `autoparse.ts` (`AutoParser`: `**/*` watcher with a cheap path pre-filter, `dbt parse` via execFile with the
+  target + `debugArgs` flags only, 5 min timeout, killed on dispose; status bar item; output channel
+  "dbt Commander: auto-parse"; `parses` counter for tests). Every dbt process the extension starts registers:
+  `runner.ts` tasks (wait in the terminal with a message), `testing.ts`, `captureDbt` (extension.ts), `runShow`
+  (query.ts) — all wait for a running auto-parse first (`whenIdleUnless`, cancellable). Not tracked: dbt run in a
+  terminal, the SQLFluff dbt templater. Setting `dbtCommander.autoParse` (default on; settings page checkbox).
+  The integration workspace turns it **off** (`run.js`) so other steps stay deterministic; section `v16` turns it
+  on (the whole suite also passed with it on, 2026-11-22).
+  Design: `docs/superpowers/specs/2026-11-22-dbt-commander-v0.16-auto-parse-design.md`.
 - **v0.15.0 — released** (https://github.com/razjir-bote/dataops-dbt-commander/releases/tag/v0.15.0) — **Add seed as source.** `addSeedsAsSource` in `projectedits.ts`
   (command `dbtCommander.addSeedAsSource`, Explorer seed CSVs + sidebar seeds); pure `csvHeader` / `addSourceTable`
   in `yamlgen.ts` (text insertion, existing lines untouched; flow / empty lists rewritten by the YAML library like
@@ -154,7 +167,7 @@ npm run package              # esbuild → dist/extension.js, then vsce → .vsi
   `npm run test:integration:serial` (or `--serial`) runs every step in one VS Code, in order, as before.
   Groups are lists of suite sections (`await section('v08')`) in `groups.js`; every group after the first starts with
   a setup step (seed, build, docs generate) standing in for what earlier steps left behind. A new step goes in a
-  section; a new section must be added to a group. Rebalance with the step times. Currently 72 checks (+ 3 setup
+  section; a new section must be added to a group. Rebalance with the step times. Currently 73 checks (+ 3 setup
   steps in parallel runs). The suite talks to the extension through the API returned by `activate()`.
 - **CI** (`.github/workflows/ci.yml`): windows-latest, Node 22, Python 3.12; typecheck, unit, integration,
   package. A pushed tag `vX.Y.Z` that equals `package.json` version publishes a GitHub release with the vsix.
@@ -192,6 +205,7 @@ npm run package              # esbuild → dist/extension.js, then vsce → .vsi
 | `settingsPanel.ts` | settings webview (venv, target, extra flags) |
 | `query.ts` | `runShow` (shared by Preview Data), scratchpads, preview selection / CTE, YAML quick-fix code actions |
 | `yamlcontext.ts` / `yamlcomplete.ts` / `yamlCompletion.ts` | pure YAML cursor context / pure suggestion rules / YAML completion provider |
+| `autoparseCore.ts` / `autoparse.ts` | pure auto-parse trigger / dbt activity registry / scheduler; the watcher + background `dbt parse` + status bar |
 | `sqlfluff.ts` / `sqlfluffRunner.ts` | pure SQLFluff helpers / optional linting, fix on save, formatter, commands |
 | `bronze.ts` / `scd2.ts` | pure: the bronze → staging template / SCD2 change-key template + `hash_columns` macro |
 | `exportrows.ts` / `profile.ts` | pure: preview sort / filter / CSV / TSV / profile query + display rows |

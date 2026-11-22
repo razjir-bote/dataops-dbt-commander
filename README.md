@@ -46,6 +46,11 @@ Supports dbt-core 1.x (tested with 1.12); not dbt 2 / Fusion.
   Compile / Preview / Generate YAML / Show lineage on right-click. **Ctrl/Shift-click** to select several models,
   seeds, folders, tests or snapshots, then use a button or right-click: they run as one dbt command. Right-click
   also offers **Build + Upstream / + Downstream / + Upstream & Downstream** for the selection (folders included).
+- **Auto-parse** — saving, adding or deleting models, YAML, seeds, snapshots, macros or tests (or editing
+  `dbt_project.yml`) runs `dbt parse` in the background, so the sidebar, Tests view, lineage and completion keep up
+  without a command. It waits 1.5 s for a burst of saves, never runs beside another dbt command in the project
+  (those wait for it, and a command that already parsed makes it unnecessary), and shows `dbt parse` / `dbt parse
+  failed` in the status bar (click for dbt's output). `dbtCommander.autoParse` (on by default, or the settings page).
 - **Lineage** — a view under Project shows the open model's **upstream** (models, seeds, snapshots, sources) and
   **downstream** (models, snapshots, exposures), each expandable level by level; click to open, Build on models.
   It follows the active editor; *Show lineage* pins it to a node until you press *Follow active editor* — on a

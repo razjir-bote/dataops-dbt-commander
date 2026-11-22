@@ -109,6 +109,7 @@ export class SettingsPanel {
       venvPath: cfg.get<string>('venvPath', ''),
       target: cfg.get<string>('target', ''),
       extraArgs: cfg.get<string>('extraArgs', ''),
+      autoParse: cfg.get<boolean>('autoParse', true),
       sqlfluffEnabled: cfg.get<string>('sqlfluff.enabled', 'off'),
       sqlfluffFixOnSave: cfg.get<boolean>('sqlfluff.fixOnSave', false),
       sqlfluffDialect: cfg.get<string>('sqlfluff.dialect', ''),
@@ -150,6 +151,10 @@ export class SettingsPanel {
           await cfg.update('venvPath', value(msg.venvPath), target);
           await cfg.update('target', value(msg.target), target);
           await cfg.update('extraArgs', value(msg.extraArgs), target);
+          // On is the default: stored as "not set" so a User-level choice still applies.
+          // …unless a broader level turns it off: then on must be stored to win.
+          const offElsewhere = cfg.inspect<boolean>('autoParse')?.globalValue === false;
+          await cfg.update('autoParse', msg.autoParse === false ? false : offElsewhere ? true : undefined, target);
           const mode = ['off', 'on', 'auto'].includes(msg.sqlfluffEnabled) ? msg.sqlfluffEnabled : 'off';
           // Defaults are stored as "not set", so a User-level SQLFluff setting still applies.
           await cfg.update('sqlfluff.enabled', mode === 'off' ? undefined : mode, target);
@@ -247,6 +252,11 @@ export class SettingsPanel {
     <div class="hint">Appended to every run / build / test, separated by spaces.</div>
   </div>
 
+  <div class="field">
+    <label class="check"><input id="autoParse" type="checkbox" style="flex:none;width:auto"> Parse automatically when project files change</label>
+    <div class="hint">Runs <code>dbt parse</code> in the background after you save, add or delete models, YAML, seeds, macros or tests, so the sidebar, lineage and completion stay current. Never runs beside another dbt command.</div>
+  </div>
+
   <h2>SQLFluff linting</h2>
   <p class="sub">Lint dbt SQL files with the SQLFluff installed in the venv above. Off by default.</p>
 
@@ -291,6 +301,7 @@ export class SettingsPanel {
 <script nonce="${nonce}">
   const vscode = acquireVsCodeApi();
   const $ = id => document.getElementById(id);
+  const autoParse = $('autoParse');
   const venv = $('venv'), target = $('target'), extra = $('extra'), version = $('version'), status = $('status');
   const sfEnabled = $('sfEnabled'), sfFix = $('sfFix'), sfDialect = $('sfDialect'), sfExtra = $('sfExtra'), sfVersion = $('sfVersion');
   // Off: the SQLFluff options don't apply — grey them out.
@@ -312,9 +323,10 @@ export class SettingsPanel {
     timer = setTimeout(() => vscode.postMessage({ type: 'check', venvPath: venv.value }), 500);
   });
   [target, extra, sfDialect, sfExtra].forEach(el => el.addEventListener('input', () => { dirty = true; status.textContent = ''; }));
+  autoParse.addEventListener('change', () => { dirty = true; status.textContent = ''; });
   [sfEnabled, sfFix].forEach(el => el.addEventListener('change', () => { dirty = true; status.textContent = ''; syncSqlfluff(); }));
   $('save').addEventListener('click', () => vscode.postMessage({
-    type: 'save', venvPath: venv.value, target: target.value, extraArgs: extra.value,
+    type: 'save', venvPath: venv.value, target: target.value, extraArgs: extra.value, autoParse: autoParse.checked,
     sqlfluffEnabled: sfEnabled.value, sqlfluffFixOnSave: sfFix.checked, sqlfluffDialect: sfDialect.value, sqlfluffExtraArgs: sfExtra.value
   }));
 
@@ -324,6 +336,7 @@ export class SettingsPanel {
       case 'state':
         if (msg.soft && dirty) break; // panel reopened: keep the user's unsaved edits
         venv.value = msg.state.venvPath; target.value = msg.state.target; extra.value = msg.state.extraArgs;
+        autoParse.checked = msg.state.autoParse !== false;
         sfEnabled.value = ['off', 'on', 'auto'].includes(msg.state.sqlfluffEnabled) ? msg.state.sqlfluffEnabled : 'off';
         sfFix.checked = !!msg.state.sqlfluffFixOnSave; sfDialect.value = msg.state.sqlfluffDialect; sfExtra.value = msg.state.sqlfluffExtraArgs;
         syncSqlfluff();

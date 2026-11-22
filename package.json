@@ -264,6 +264,11 @@
         "command": "dbtCommander.addSeedAsSource",
         "title": "dbt Add seed as source…",
         "category": "dbt Commander"
+      },
+      {
+        "command": "dbtCommander.autoParseOutput",
+        "title": "dbt Show background parse output",
+        "category": "dbt Commander"
       }
     ],
     "submenus": [
@@ -920,6 +925,11 @@
           "type": "string",
           "default": "vars.yaml",
           "description": "SCD2: the vars file (relative to the project) whose scd2_dimensions: list gets each new dimension's entry."
+        },
+        "dbtCommander.autoParse": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run dbt parse in the background when files dbt reads change (models, YAML, seeds, snapshots, macros, tests, dbt_project.yml), so the sidebar, lineage and completion stay current. Waits for other dbt commands; a failure shows in the status bar."
         }
       }
     },

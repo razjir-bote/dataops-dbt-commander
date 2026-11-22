@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { execFile } from 'child_process';
 import { cteQueryAt, inlineSql } from './scratch';
+import { dbtActivity } from './autoparseCore';
 import { ShowResult, parseShowOutput } from './show';
 import { PreviewOptions, PreviewPanel } from './previewPanel';
 import { ColumnOwner, isMinMaxError, profileRows, profileSql, relationSql, yamlColumnSql } from './profile';
@@ -62,15 +63,29 @@ export async function runShow(
     const output = await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: `dbt show ${title}`, cancellable: true },
       (_progress, token) =>
-        new Promise<string>(resolve => {
-          const child = execFile(
-            exe,
-            args,
-            { cwd, maxBuffer: 64 * 1024 * 1024, windowsHide: true, env: { ...process.env, PYTHONIOENCODING: 'utf-8' } },
-            (err, stdout, stderr) => resolve(`${stdout}\n${stderr}${err && !stdout && !stderr ? err.message : ''}`)
-          );
-          token.onCancellationRequested(() => killTree(child));
-        })
+        // After a background dbt parse, if one runs (cancel works while waiting too).
+        dbtActivity.whenIdleUnless(cwd, 'auto', token).then(idle =>
+          !idle
+            ? 'Cancelled.'
+            : new Promise<string>(resolve => {
+                const endActivity = dbtActivity.begin(cwd, 'user', args);
+                try {
+                  const child = execFile(
+                    exe,
+                    args,
+                    { cwd, maxBuffer: 64 * 1024 * 1024, windowsHide: true, env: { ...process.env, PYTHONIOENCODING: 'utf-8' } },
+                    (err, stdout, stderr) => {
+                      endActivity(err ? 1 : 0);
+                      resolve(`${stdout}\n${stderr}${err && !stdout && !stderr ? err.message : ''}`);
+                    }
+                  );
+                  token.onCancellationRequested(() => killTree(child));
+                } catch (e) {
+                  endActivity();
+                  resolve(e instanceof Error ? e.message : String(e));
+                }
+              })
+        )
     );
     const parsed = parseShowOutput(output);
     const result = parsed.rows && options.transform ? { rows: options.transform(parsed.rows) } : parsed;

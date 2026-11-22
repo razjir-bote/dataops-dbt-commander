@@ -1383,5 +1383,60 @@ exports.run = async () => {
     }
   });
 
+  // ----- v0.16: auto-parse -----
+  await section('v16');
+
+  await step('auto-parse: new / edited / broken files reach the sidebar without a command; waits for dbt run; off = nothing', async () => {
+    const ap = api.autoParse;
+    const model = file('models', 'zz_auto.sql');
+    const yml = file('models', 'zz_auto.yml');
+    const modelNames = async () => {
+      const top = await api.sidebar.getChildren();
+      return labels(await api.sidebar.getChildren(await child(top, 'Models')));
+    };
+    const manifestNode = name => {
+      const m = JSON.parse(fs.readFileSync(file('target', 'manifest.json'), 'utf8'));
+      return Object.values(m.nodes).find(n => n.resource_type === 'model' && n.name === name);
+    };
+    try {
+      await cfg().update('autoParse', true, vscode.ConfigurationTarget.Workspace);
+      // A new model: in the sidebar, no dbt command run by the test.
+      fs.writeFileSync(model, 'select 1 as id\n');
+      await waitFor('zz_auto in the sidebar', async () => (await modelNames()).includes('zz_auto'), 60000);
+      // Its YAML: the description reaches the manifest.
+      fs.writeFileSync(yml, 'version: 2\nmodels:\n  - name: zz_auto\n    description: written by auto-parse\n');
+      await waitFor('description in the manifest', () => manifestNode('zz_auto')?.description === 'written by auto-parse', 60000);
+
+      // Broken: the failure shows, the sidebar keeps the last parse; fixing it clears the failure.
+      fs.writeFileSync(model, "select * from {{ ref('b' }}\n");
+      await waitFor('parse failure', () => ap.failure(root), 60000);
+      assert.match(ap.failure(root), /error/i, ap.failure(root));
+      assert.ok((await modelNames()).includes('b'), 'the sidebar still lists the other models');
+      fs.writeFileSync(model, "select * from {{ ref('b') }}\n");
+      await waitFor('failure cleared', () => !ap.failure(root), 60000);
+
+      // During a dbt run: a change waits for the run, then parses once.
+      const before = ap.parses;
+      const running = vscode.commands.executeCommand('dbtCommander.run', uri('models', 'b.sql'));
+      await waitFor('dbt run started', () => vscode.tasks.taskExecutions.some(t => t.task.definition.type === 'dbtCommander'), 30000);
+      fs.writeFileSync(model, "select * from {{ ref('b') }} -- touched\n");
+      await running;
+      await waitFor('parse after the run', () => ap.parses > before, 60000);
+      assert.equal(ap.parses, before + 1, 'one parse');
+
+      // Off: nothing runs.
+      await cfg().update('autoParse', false, vscode.ConfigurationTarget.Workspace);
+      const off = ap.parses;
+      fs.writeFileSync(model, 'select 2 as id\n');
+      await sleep(4000);
+      assert.equal(ap.parses, off, 'auto-parse off: no parse');
+    } finally {
+      await cfg().update('autoParse', undefined, vscode.ConfigurationTarget.Workspace);
+      fs.rmSync(model, { force: true });
+      fs.rmSync(yml, { force: true });
+      await vscode.commands.executeCommand('dbtCommander.parse');
+    }
+  });
+
   fs.writeFileSync(process.env.ITEST_OUT, out.join('\n'));
 };

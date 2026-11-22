@@ -6,6 +6,7 @@ import { ProblemStore, executedNodes, parseDbtErrors } from './errors';
 import { invocationOf } from './runresults';
 import { runSummary } from './runstate';
 import { PROCESS_LIST_PS, descendants, parseProcessList } from './proctree';
+import { dbtActivity } from './autoparseCore';
 
 /** Kill a process and its children. On Windows dbt.exe is a launcher for python.exe, so kill the tree. */
 export function killTree(child: ChildProcess): void {
@@ -131,24 +132,52 @@ export async function runDbtTask(opts: RunOptions): Promise<number | undefined> 
     const pty: vscode.Pseudoterminal = {
       onDidWrite: write.event,
       onDidClose: close.event,
-      open: () => {
+      open: () => void start(),
+      close: () => {
+        if (child) {
+          killTree(child);
+        }
+        settled = true; // the process's own close event ends its activity (it may take a moment to die)
+      }
+    };
+    let endActivity: ((code?: number) => void) | undefined;
+    // A background dbt parse (auto-parse) writes target/ too: wait for it, never run beside it.
+    const start = async () => {
+        if (dbtActivity.busy(opts.cwd, 'auto')) {
+          write.fire('\x1b[2mWaiting for the background dbt parse to finish…\x1b[0m\r\n');
+          await dbtActivity.whenIdle(opts.cwd, 'auto');
+        }
+        if (settled) {
+          return; // closed while waiting
+        }
         const started = Date.now();
         const rrFile = path.join(opts.targetDir, 'run_results.json');
         const previousInvocation = invocationIn(rrFile);
         write.fire(`\x1b[2m> dbt ${opts.args.join(' ')}\x1b[0m\r\n\r\n`);
-        child = spawn(opts.exe, opts.args, {
-          cwd: opts.cwd,
-          windowsHide: true,
-          env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
-        });
+        endActivity = dbtActivity.begin(opts.cwd, 'user', opts.args);
+        try {
+          child = spawn(opts.exe, opts.args, {
+            cwd: opts.cwd,
+            windowsHide: true,
+            env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
+          });
+        } catch (e) {
+          endActivity();
+          settle(undefined, `\r\n\x1b[31mFailed to start dbt: ${e instanceof Error ? e.message : String(e)}\x1b[0m\r\n`);
+          return;
+        }
         const onData = (text: string) => {
           output += text;
           write.fire(text.replace(/\r?\n/g, '\r\n'));
         };
         child.stdout?.setEncoding('utf8').on('data', onData);
         child.stderr?.setEncoding('utf8').on('data', onData);
-        child.on('error', err => settle(undefined, `\r\n\x1b[31mFailed to start dbt: ${err.message}\x1b[0m\r\n`));
+        child.on('error', err => {
+          endActivity?.();
+          settle(undefined, `\r\n\x1b[31mFailed to start dbt: ${err.message}\x1b[0m\r\n`);
+        });
         child.on('close', code => {
+          endActivity?.(code ?? undefined);
           if (settled) {
             return;
           }
@@ -165,13 +194,6 @@ export async function runDbtTask(opts: RunOptions): Promise<number | undefined> 
           settle(code ?? undefined, `\r\n\x1b[${code === 0 ? 32 : 31}m● dbt exited with code ${code}\x1b[0m\r\n`);
           void notifyIfLong(opts, Date.now() - started, code ?? undefined, json);
         });
-      },
-      close: () => {
-        if (child) {
-          killTree(child);
-        }
-        settled = true;
-      }
     };
     return pty;
   });
