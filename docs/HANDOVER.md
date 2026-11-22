@@ -1,7 +1,7 @@
 # DataOps dbt Commander — developer handover
 
 Keep this file current: update it in the same commit as any change to features, architecture, build/release
-process, or known issues. Last updated: 2026-11-22 (v0.15.0 released; v0.16 auto-parse implemented, not committed).
+process, or known issues. Last updated: 2026-11-22 (v0.15.0 released; v0.16 auto-parse committed, not released).
 
 ## What this is
 A VS Code extension (TypeScript) for working with **dbt-core 1.x** (tested with 1.12.7) on **Windows**, running
