@@ -181,6 +181,39 @@ export function cteQueryAt(sql: string, offset: number): { name: string; sql: st
 }
 
 /**
+ * A selection (offsets into the model) that is whole CTEs — from a CTE's name (or the `with`) to a CTE's closing
+ * bracket (or the comma after it), whitespace and comments around it ignored — as a query selecting from the last
+ * CTE selected, with the model's CTEs (so the ones it reads from are there). Undefined for any other selection.
+ */
+export function selectedCteQuery(sql: string, start: number, end: number): { name: string; sql: string } | undefined {
+  const ctes = ctesIn(sql);
+  if (!ctes.length) {
+    return undefined;
+  }
+  const toks = tokens(sql, DIALECTS[0]).filter(t => t.start >= start && t.end <= end);
+  if (toks[toks.length - 1]?.kind === 'comma') {
+    toks.pop();
+  }
+  if (is(toks[0], 'with')) {
+    toks.shift();
+    if (is(toks[0], 'recursive')) {
+      toks.shift();
+    }
+  }
+  // A token cut by the selection's edge isn't in `toks`: then the first / last kept token isn't a CTE's edge.
+  const cut = (t: Token) => (t.start < start && t.end > start) || (t.start < end && t.end > end);
+  if (!toks.length || tokens(sql, DIALECTS[0]).some(cut)) {
+    return undefined;
+  }
+  const first = ctes.findIndex(c => c.start === toks[0].start);
+  const last = ctes.findIndex(c => c.end === toks[toks.length - 1].end);
+  if (first < 0 || last < first) {
+    return undefined;
+  }
+  return cteQueryAt(sql, ctes[last].start);
+}
+
+/**
  * A selection of CTEs ending in a comma (`with a as (…), b as (…),`) — not runnable as it is — as a query selecting
  * from its last CTE. The `with` may be left out (CTEs selected from the middle of a model). Jinja tags after the
  * comma (e.g. the `{% endif %}` closing the last CTE) are kept; comments are dropped. Undefined for anything else.

@@ -1398,7 +1398,12 @@ exports.run = async () => {
       return labels(await api.sidebar.getChildren(await child(top, 'Models')));
     };
     const manifestNode = name => {
-      const m = JSON.parse(fs.readFileSync(file('target', 'manifest.json'), 'utf8'));
+      let m;
+      try {
+        m = JSON.parse(fs.readFileSync(file('target', 'manifest.json'), 'utf8'));
+      } catch {
+        return undefined; // dbt is writing it right now: waitFor tries again
+      }
       return Object.values(m.nodes).find(n => n.resource_type === 'model' && n.name === name);
     };
     try {
@@ -1463,6 +1468,10 @@ exports.run = async () => {
       // Just first_cte, with its comma.
       ed.selection = new vscode.Selection(0, 0, 2, 2);
       assert.deepEqual((await api.query.previewSelection(ed)).rows, [{ n: 1 }]);
+      // Only third_cte (the last, no comma): the CTEs it reads from come from the model.
+      ed.selection = new vscode.Selection(6, 0, 6, 48);
+      const third = await api.query.previewSelection(ed);
+      assert.deepEqual(third && third.rows, [{ n: 3 }], JSON.stringify(third));
     } finally {
       await vscode.commands.executeCommand('workbench.action.revertAndCloseActiveEditor');
     }

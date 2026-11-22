@@ -14,10 +14,13 @@ Since v0.9.0 the extension ID is `local.dataops-dbt-commander` and every command
 is `dbtCommander.*`; `migrate.ts` copies old `dbtRunner.*` user and workspace settings once on activation.
 
 ## Status
-- **v0.16 (unreleased): Preview Selection / CTE on a selection ending in a comma** selects from the last CTE
+- **v0.16 (unreleased): Preview Selection / CTE on whole CTEs or a selection ending in a comma** selects from the last CTE
   selected: `trailingCteQuery` in `scratch.ts` (comma found with the comment / string / Jinja-aware tokenizer; the
   selection minus the comma must end exactly at a CTE found by `ctesIn`, retried with `with ` prefixed for CTEs
-  selected from the middle; Jinja tags after the comma kept). Used first in `previewSelection` (query.ts).
+  selected from the middle; Jinja tags after the comma kept). Before it, `selectedCteQuery(model, start, end)`: a
+  selection that is whole CTEs of the model (from a CTE name / the `with` to a CTE's `)` / its comma; no token cut
+  by the selection) → `cteQueryAt` on the last one, so earlier CTEs it reads from are included. Order in
+  `previewSelection` (query.ts): selectedCteQuery → trailingCteQuery → the selection as is.
 - **v0.16 (unreleased): one right-click list.** `package.json` menus: Explorer + editor tab → submenu
   `dbtCommander.submenu`, code editor → `dbtCommander.editorSubmenu` (both labelled `dbt`; nothing loose in VS Code's
   menus — seed CSVs and YAML included); sidebar / Lineage view items use the same groups `1_run` · `2_graph` ·
