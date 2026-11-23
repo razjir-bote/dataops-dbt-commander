@@ -7,7 +7,6 @@ generate staging, SCD2 and YAML files in your team's patterns. dbt runs from a P
 - **Works with:** dbt-core 1.x (tested with 1.12) and any adapter installed in that venv (Synapse / SQL Server,
   Databricks, Snowflake, DuckDB, …). Not dbt 2 / dbt Fusion.
 - **Needs:** VS Code 1.90 or later. Tested on Windows.
-- _Formerly "dbt Runner": settings saved as `dbtRunner.*` move to `dbtCommander.*` automatically._
 
 ---
 
