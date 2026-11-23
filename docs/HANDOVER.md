@@ -1,7 +1,7 @@
 # DataOps dbt Commander — developer handover
 
 Keep this file current: update it in the same commit as any change to features, architecture, build/release
-process, or known issues. Last updated: 2026-11-22 (v0.15.0 released; v0.16 auto-parse committed, not released).
+process, or known issues. Last updated: 2026-11-24 (v0.16.0 released).
 
 ## What this is
 A VS Code extension (TypeScript) for working with **dbt-core 1.x** (tested with 1.12.7) on **Windows**, running
@@ -14,27 +14,27 @@ Since v0.9.0 the extension ID is `local.dataops-dbt-commander` and every command
 is `dbtCommander.*`; `migrate.ts` copies old `dbtRunner.*` user and workspace settings once on activation.
 
 ## Status
-- **v0.16 (unreleased): Copy Compiled SQL** (`dbtCommander.copyCompiled`, `ctrl+' y`; Inspect group after Compile).
+- **v0.16.0 — released** (https://github.com/razjir-bote/dataops-dbt-commander/releases/tag/v0.16.0) — **Copy Compiled SQL** (`dbtCommander.copyCompiled`, `ctrl+' y`; Inspect group after Compile).
   What to compile comes from `pickQuery` in `scratch.ts` — the one picker Preview Selection / CTE uses too (whole
   CTEs → trailing comma → plain selection → CTE at the cursor → unsaved text → the saved model node). A model node:
   `dbt compile --select … --quiet` (captured, no terminal), then its file under target/compiled (`compiledPath`);
   anything else: `dbt compile --inline … --quiet`, whose stdout is the compiled SQL. `copyCompiled` in query.ts
   (deps `compileModel` / `compileInline` in extension.ts); a failure or cancel leaves the clipboard alone.
-- **v0.16 (unreleased): Preview Selection / CTE on whole CTEs or a selection ending in a comma** selects from the last CTE
+- **Also in v0.16.0: Preview Selection / CTE on whole CTEs or a selection ending in a comma** selects from the last CTE
   selected: `trailingCteQuery` in `scratch.ts` (comma found with the comment / string / Jinja-aware tokenizer; the
   selection minus the comma must end exactly at a CTE found by `ctesIn`, retried with `with ` prefixed for CTEs
   selected from the middle; Jinja tags after the comma kept). Before it, `selectedCteQuery(model, start, end)`: a
   selection that is whole CTEs of the model (from a CTE name / the `with` to a CTE's `)` / its comma; no token cut
   by the selection) → `cteQueryAt` on the last one, so earlier CTEs it reads from are included. Order in
   `previewSelection` (query.ts): selectedCteQuery → trailingCteQuery → the selection as is.
-- **v0.16 (unreleased): one right-click list.** `package.json` menus: Explorer + editor tab → submenu
+- **Also in v0.16.0: one right-click list.** `package.json` menus: Explorer + editor tab → submenu
   `dbtCommander.submenu`, code editor → `dbtCommander.editorSubmenu` (both labelled `dbt`; nothing loose in VS Code's
   menus — seed CSVs and YAML included); sidebar / Lineage view items use the same groups `1_run` · `2_graph` ·
   `3_inspect` · `4_create` · `5_refactor` · `6_sqlfluff` · `9_settings` and order. The list lives in
   `src/test/menus.test.ts` (`LIST`), which fails when a menu item is missing from it or out of place: add a new
   command there first. Titles have no `dbt ` prefix (category `dbt Commander` / the submenu says it), Title Case;
   project-wide commands read `Run dbt deps` / `Run dbt seed (all)` etc.
-- **v0.16 (unreleased): auto-parse.** `autoparseCore.ts` (pure: `parseTrigger(rel, paths)`; `DbtActivity` — the
+- **Also in v0.16.0: auto-parse.** `autoparseCore.ts` (pure: `parseTrigger(rel, paths)`; `DbtActivity` — the
   one registry (`dbtActivity`) of dbt processes per project, `'auto'` or `'user'`; `ParseScheduler` — 1.5 s debounce
   per project, one parse at a time + one queued, waits while any dbt runs in the project, a user command that
   parses, exits 0 and started after the last change cancels the pending parse and clears a failure) and

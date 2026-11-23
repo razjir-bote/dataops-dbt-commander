@@ -2,7 +2,7 @@
   "name": "dataops-dbt-commander",
   "displayName": "DataOps dbt Commander",
   "description": "Run, build, test, compile and preview dbt models from the VS Code Explorer and editor with dbt-core 1.x from a configured venv.",
-  "version": "0.15.0",
+  "version": "0.16.0",
   "publisher": "local",
   "license": "MIT",
   "engines": {
