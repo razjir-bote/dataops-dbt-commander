@@ -1,7 +1,7 @@
 # DataOps dbt Commander — developer handover
 
 Keep this file current: update it in the same commit as any change to features, architecture, build/release
-process, or known issues. Last updated: 2026-11-24 (v0.16.0 released; SQLFluff dbt templater path mode on main).
+process, or known issues. Last updated: 2026-11-24 (v0.16.1 released).
 
 ## What this is
 A VS Code extension (TypeScript) for working with **dbt-core 1.x** (tested with 1.12.7) on **Windows**, running
@@ -14,7 +14,7 @@ Since v0.9.0 the extension ID is `local.dataops-dbt-commander` and every command
 is `dbtCommander.*`; `migrate.ts` copies old `dbtRunner.*` user and workspace settings once on activation.
 
 ## Status
-- **Unreleased (main): SQLFluff path mode for the dbt templater.** sqlfluff-templater-dbt raises "does not support
+- **v0.16.1 — released** (https://github.com/razjir-bote/dataops-dbt-commander/releases/tag/v0.16.1) — **SQLFluff path mode for the dbt templater.** sqlfluff-templater-dbt raises "does not support
   stdin input" whenever `fname == "stdin"` — and `lint -` / `fix -` always pass `"stdin"`, `--stdin-filename` only
   picks the config. So `SqlFluff.pathMode(file)` (sqlfluffRunner.ts): `--templater` in `sqlfluff.extraArgs`, else the
   nearest config's core `templater` (`configCore`; folders nearest first, in a folder pyproject.toml > .sqlfluff >
