@@ -4,6 +4,7 @@
  */
 import * as path from 'path';
 import type { ProjectPaths } from './projectconfig';
+import { isFixCopy } from './sqlfluff';
 
 /** Project files outside the resource folders that dbt reads while parsing. */
 const PROJECT_FILES = new Set(['dbt_project.yml', 'packages.yml', 'dependencies.yml', 'selectors.yml']);
@@ -13,7 +14,7 @@ const TOOLING = /(^|\/)(\.git|node_modules|\.venv|venv|__pycache__)(\/|$)/i;
 /** Does a change to this project-relative path (a file, or a folder created / deleted) need a parse? */
 export function parseTrigger(rel: string, paths: ProjectPaths): boolean {
   const r = rel.replace(/\\/g, '/').replace(/^\.\//, '');
-  if (!r || r.startsWith('../') || TOOLING.test(r)) {
+  if (!r || r.startsWith('../') || TOOLING.test(r) || isFixCopy(r)) {
     return false;
   }
   if (PROJECT_FILES.has(r.toLowerCase())) {

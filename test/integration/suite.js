@@ -1210,6 +1210,80 @@ exports.run = async () => {
     }
   });
 
+  await step('SQLFluff dbt templater (path mode): lint and Format Document read the saved file, fix on save after the save', async () => {
+    // A "dbt" templater stand-in (test/fixtures/sqlfluff-stub-dbt) refuses stdin as sqlfluff-templater-dbt does.
+    const dir = file('models', 'zz_pathmode');
+    const f = path.join(dir, 'zz_pm.sql');
+    const messy = 'SELECT a,b from t\n';
+    const fixed = /SELECT\r?\n\s+a,\r?\n\s+b\r?\nFROM t\r?\n/;
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, '.sqlfluff'), '[sqlfluff]\ndialect = ansi\ntemplater = dbt\n');
+    fs.writeFileSync(f, messy);
+    const leftovers = () => fs.readdirSync(dir).filter(n => /dbtcommander-sqlfluff-fix/i.test(n));
+    try {
+      await cfg().update('sqlfluff.enabled', 'on', vscode.ConfigurationTarget.Workspace);
+      await waitFor('sqlfluff active', () => api.sqlfluff.active);
+      assert.equal(await api.sqlfluff.pathMode(f), true);
+      const doc = await vscode.workspace.openTextDocument(f);
+      const ed = await vscode.window.showTextDocument(doc);
+      const problems = await waitFor('path-mode problems', () => (sqlfluffProblems(doc.uri).length ? sqlfluffProblems(doc.uri) : undefined), 60000);
+      assert.ok(problems.some(p => /^LT\d\d/.test(String(p.code))), problems.map(p => `${p.code} ${p.message}`).join(', '));
+
+      // Saved file: Format Document gives the fix; the file on disk is left alone and no copy stays behind.
+      const edits = await vscode.commands.executeCommand('vscode.executeFormatDocumentProvider', doc.uri, { tabSize: 4, insertSpaces: true });
+      assert.ok(edits && edits.length > 0, 'Format Document gave no edit: ' + JSON.stringify(edits));
+      const formatted = await vscode.workspace.openTextDocument({ language: 'sql', content: doc.getText() });
+      const p2 = new vscode.WorkspaceEdit();
+      p2.set(formatted.uri, edits);
+      assert.ok(await vscode.workspace.applyEdit(p2));
+      assert.match(formatted.getText(), fixed, formatted.getText());
+      assert.equal(fs.readFileSync(f, 'utf8'), messy);
+      assert.deepEqual(leftovers(), []);
+
+      // Unsaved edits: Format Document can't read them, so no edit.
+      await ed.edit(e => e.insert(new vscode.Position(0, 0), '-- touched\n'));
+      const none = await vscode.commands.executeCommand('vscode.executeFormatDocumentProvider', doc.uri, { tabSize: 4, insertSpaces: true });
+      assert.ok(!none || none.length === 0, 'Format Document of unsaved text in path mode: ' + JSON.stringify(none));
+
+      // Fix on save: the save writes the edits, then the fix is applied and saved again.
+      await cfg().update('sqlfluff.fixOnSave', true, vscode.ConfigurationTarget.Workspace);
+      await doc.save();
+      const saved = await waitFor(
+        'path-mode fix after the save',
+        () => {
+          const s = fs.readFileSync(f, 'utf8');
+          return fixed.test(s) && !doc.isDirty ? s : undefined;
+        },
+        60000
+      );
+      assert.match(saved, /^-- touched\r?\n/, saved);
+      assert.equal(doc.getText(), saved);
+      assert.deepEqual(leftovers(), []);
+
+      // Format on Save (VS Code's own setting) calls the formatter during the save: the fix follows the save too.
+      await cfg().update('sqlfluff.fixOnSave', undefined, vscode.ConfigurationTarget.Workspace);
+      await vscode.workspace.getConfiguration('editor', doc.uri).update('formatOnSave', true, vscode.ConfigurationTarget.Workspace);
+      await ed.edit(e => e.replace(new vscode.Range(doc.positionAt(0), doc.positionAt(doc.getText().length)), 'SELECT x,y from u\n'));
+      await doc.save();
+      const formatted2 = await waitFor(
+        'path-mode Format on Save after the save',
+        () => {
+          const s = fs.readFileSync(f, 'utf8');
+          return /SELECT\r?\n\s+x,\r?\n\s+y\r?\nFROM u/.test(s) && !doc.isDirty ? s : undefined;
+        },
+        60000
+      );
+      assert.equal(doc.getText(), formatted2);
+      assert.deepEqual(leftovers(), []);
+    } finally {
+      await vscode.workspace.getConfiguration('editor').update('formatOnSave', undefined, vscode.ConfigurationTarget.Workspace);
+      await cfg().update('sqlfluff.enabled', undefined, vscode.ConfigurationTarget.Workspace);
+      await cfg().update('sqlfluff.fixOnSave', undefined, vscode.ConfigurationTarget.Workspace);
+      await closeAll();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   // ----- v0.13: YAML autocomplete -----
   await section('v13');
 

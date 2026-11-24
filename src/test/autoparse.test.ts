@@ -42,6 +42,7 @@ test('parseTrigger: project files dbt reads count; target / packages / logs / to
     'models/.git/HEAD',
     'models/__pycache__/x.pyc',
     'models/a.sql.swp',
+    'models/a.dbtcommander-sqlfluff-fix-123-4.sql', // a path-mode SQLFluff fix's short-lived copy
     'README.md',
     'profiles.yml', // read per command, not part of the manifest
     'other/x.sql',

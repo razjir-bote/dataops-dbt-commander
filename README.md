@@ -208,6 +208,12 @@ on the settings page:
 Your `.sqlfluff` / `.sqlfluffignore` are used; with no dialect configured, the dbt adapter's is passed (`synapse` →
 `tsql`, `databricks`, `snowflake`, `duckdb`, …). *Off* never starts SQLFluff.
 
+**dbt templater** (`templater = dbt`, from `pip install sqlfluff-templater-dbt`): it can't read the editor's text, only
+the saved file, so with it SQLFluff checks and fixes the file as saved. Problems update when you save; fix on save
+runs just after the save; **Fix File** saves first; **Format Document** on unsaved edits asks you to save first.
+Your file is never rewritten by SQLFluff: the fix goes into the editor as one undo step. The jinja templater (the
+default) has none of these limits and is much faster.
+
 ### Also
 
 - Custom `model-paths`, `seed-paths`, `snapshot-paths` and `packages-install-path` in `dbt_project.yml` are respected

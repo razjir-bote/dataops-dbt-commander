@@ -1,7 +1,7 @@
 # DataOps dbt Commander — developer handover
 
 Keep this file current: update it in the same commit as any change to features, architecture, build/release
-process, or known issues. Last updated: 2026-11-24 (v0.16.0 released).
+process, or known issues. Last updated: 2026-11-24 (v0.16.0 released; SQLFluff dbt templater path mode on main).
 
 ## What this is
 A VS Code extension (TypeScript) for working with **dbt-core 1.x** (tested with 1.12.7) on **Windows**, running
@@ -14,6 +14,26 @@ Since v0.9.0 the extension ID is `local.dataops-dbt-commander` and every command
 is `dbtCommander.*`; `migrate.ts` copies old `dbtRunner.*` user and workspace settings once on activation.
 
 ## Status
+- **Unreleased (main): SQLFluff path mode for the dbt templater.** sqlfluff-templater-dbt raises "does not support
+  stdin input" whenever `fname == "stdin"` — and `lint -` / `fix -` always pass `"stdin"`, `--stdin-filename` only
+  picks the config. So `SqlFluff.pathMode(file)` (sqlfluffRunner.ts): `--templater` in `sqlfluff.extraArgs`, else the
+  nearest config's core `templater` (`configCore`; folders nearest first, in a folder pyproject.toml > .sqlfluff >
+  tox.ini > setup.cfg), is `dbt` — or a stdin run already refused (`refusesStdin`, remembered per file until a
+  settings change). Path mode: lint = `lint <file>` (skipped while dirty; the save lints); fix = `fix <file>
+  --fixed-suffix .dbtcommander-sqlfluff-fix-<pid>-<n>` → SQLFluff writes the fixed copy beside the file (only when
+  something changed), the extension reads it as one edit and deletes it; the file itself is never rewritten by
+  SQLFluff. `parseTrigger` ignores those copies (`isFixCopy`). Fix on save in path mode: will-save marks the file
+  (`fixAfterSave`), `onDidSave` fixes the saved file and re-saves (`applyLate` → `saveQuietly`, which skips fix on
+  save and the save's own lint; the mark holds the version and is dropped by the next will-save, so a save that
+  never completed can't fix a later auto-save). Lint / Fix commands save unsaved edits first. Format Document on
+  unsaved edits returns nothing and starts a 2 s timer (`formatPending`): a save inside it was Format on Save
+  (`editor.formatOnSave`) → the fix follows the save; no save → "save the file first". The formatter returns
+  nothing during the extension's own re-save. A refusal counts only from stderr of a failed run (`fix -` prints
+  the user's SQL on stdout). SQLFluff < 3 gets `-f` for path fixes (it asks "Are you sure" otherwise; version from
+  `sqlfluff --version`, cached per executable). Integration test: a stand-in "dbt" templater
+  (`test/fixtures/sqlfluff-stub-dbt`, pip-installed into the test venv from a copy by `run.js`, reinstalled when
+  its hash changes) that refuses stdin like the real one; covers lint, Format Document, fix on save, Format on
+  Save. Not integration-tested: the refusal fallback (config we can't read), SQLFluff 2.x.
 - **v0.16.0 — released** (https://github.com/razjir-bote/dataops-dbt-commander/releases/tag/v0.16.0) — **Copy Compiled SQL** (`dbtCommander.copyCompiled`, `ctrl+' y`; Inspect group after Compile).
   What to compile comes from `pickQuery` in `scratch.ts` — the one picker Preview Selection / CTE uses too (whole
   CTEs → trailing comma → plain selection → CTE at the cursor → unsaved text → the saved model node). A model node:
@@ -187,7 +207,7 @@ npm run package              # esbuild → dist/extension.js, then vsce → .vsi
   `npm run test:integration:serial` (or `--serial`) runs every step in one VS Code, in order, as before.
   Groups are lists of suite sections (`await section('v08')`) in `groups.js`; every group after the first starts with
   a setup step (seed, build, docs generate) standing in for what earlier steps left behind. A new step goes in a
-  section; a new section must be added to a group. Rebalance with the step times. Currently 75 checks (+ 3 setup
+  section; a new section must be added to a group. Rebalance with the step times. Currently 76 checks (+ 3 setup
   steps in parallel runs). The suite talks to the extension through the API returned by `activate()`.
 - **CI** (`.github/workflows/ci.yml`): windows-latest, Node 22, Python 3.12; typecheck, unit, integration,
   package. A pushed tag `vX.Y.Z` that equals `package.json` version publishes a GitHub release with the vsix.

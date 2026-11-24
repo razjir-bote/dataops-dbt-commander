@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sqlfluff-templater-stubdbt"
+version = "1.0.0"
+description = "Integration-test stand-in for sqlfluff-templater-dbt (refuses stdin like it)."
+
+[project.entry-points.sqlfluff]
+sqlfluff_templater_stubdbt = "sqlfluff_templater_stubdbt"
+
+[tool.setuptools]
+py-modules = ["sqlfluff_templater_stubdbt"]

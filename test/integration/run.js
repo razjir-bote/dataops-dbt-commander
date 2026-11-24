@@ -35,6 +35,20 @@ function ensureSqlfluff() {
   if (!fs.existsSync(sqlfluffExe)) {
     execFileSync(venvPython, ['-m', 'pip', 'install', '--quiet', 'sqlfluff>=3,<5'], { stdio: 'inherit' });
   }
+  // A stand-in "dbt" templater that refuses stdin like sqlfluff-templater-dbt (for the path-mode checks).
+  // Reinstalled when the fixture changes (its hash is kept beside the venv).
+  const fixture = path.join(repo, 'test', 'fixtures', 'sqlfluff-stub-dbt');
+  const hash = require('crypto').createHash('sha1');
+  for (const n of fs.readdirSync(fixture).sort()) hash.update(n).update(fs.readFileSync(path.join(fixture, n)));
+  const digest = hash.digest('hex');
+  const marker = path.join(venv, 'sqlfluff-stub-dbt.sha1');
+  if (!fs.existsSync(marker) || fs.readFileSync(marker, 'utf8') !== digest) {
+    const src = path.join(cache, 'sqlfluff-stub-dbt'); // a copy: the build leaves files in the source folder
+    fs.rmSync(src, { recursive: true, force: true });
+    fs.cpSync(fixture, src, { recursive: true });
+    execFileSync(venvPython, ['-m', 'pip', 'install', '--quiet', '--force-reinstall', '--no-deps', src], { stdio: 'inherit' });
+    fs.writeFileSync(marker, digest);
+  }
 }
 
 function ensureVenv() {

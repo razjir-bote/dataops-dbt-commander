@@ -1,7 +1,65 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as path from 'path';
-import { configHasDialect, configSearchDirs, dialectFor, fixAccepted, fixArgs, fixedText, lintArgs, parseLintJson, parseSqlfluffVersion, sqlfluffExecutable } from '../sqlfluff';
+import {
+  CONFIG_FILES,
+  CONFIG_FILES_BY_PRIORITY,
+  configCore,
+  configHasDialect,
+  configSearchDirs,
+  dialectFor,
+  fixAccepted,
+  fixArgs,
+  fixCopy,
+  fixPathArgs,
+  fixedText,
+  isFixCopy,
+  lintArgs,
+  lintPathArgs,
+  parseLintJson,
+  parseSqlfluffVersion,
+  refusesStdin,
+  sqlfluffExecutable,
+  templaterArg
+} from '../sqlfluff';
+
+test('configCore: templater from the core section only, lower case, quotes dropped', () => {
+  assert.deepEqual(configCore('.sqlfluff', '[sqlfluff]\ndialect = tsql\ntemplater = dbt\n'), { dialect: true, templater: 'dbt' });
+  assert.deepEqual(configCore('.sqlfluff', '[sqlfluff]\nTemplater: DBT\n'), { dialect: false, templater: 'dbt' });
+  assert.deepEqual(configCore('.sqlfluff', '[sqlfluff:templater:dbt]\nproject_dir = .\n'), { dialect: false });
+  assert.deepEqual(configCore('pyproject.toml', '[tool.sqlfluff.core]\ntemplater = "dbt"\n'), { dialect: false, templater: 'dbt' });
+  assert.deepEqual(configCore('setup.cfg', '[metadata]\ntemplater = dbt\n'), { dialect: false });
+  assert.equal(configCore('.sqlfluff', '[sqlfluff]\n# templater = dbt\ntemplater = jinja\n').templater, 'jinja');
+});
+
+test('config files by priority: the same files, the one SQLFluff lets win first', () => {
+  assert.deepEqual([...CONFIG_FILES_BY_PRIORITY].sort(), [...CONFIG_FILES].sort());
+  assert.deepEqual(CONFIG_FILES_BY_PRIORITY, ['pyproject.toml', '.sqlfluff', 'tox.ini', 'setup.cfg']);
+});
+
+test('templaterArg: --templater dbt / --templater=dbt, the last one wins', () => {
+  assert.equal(templaterArg(['--rules', 'LT01', '--templater', 'dbt']), 'dbt');
+  assert.equal(templaterArg(['--templater=DBT']), 'dbt');
+  assert.equal(templaterArg(['--templater', 'dbt', '--templater=jinja']), 'jinja');
+  assert.equal(templaterArg(['--templater']), undefined);
+  assert.equal(templaterArg([]), undefined);
+});
+
+test('refusesStdin: the dbt templater message, on stdout or stderr', () => {
+  assert.ok(refusesStdin('User Error: The dbt templater does not support stdin input, provide a path instead'));
+  assert.ok(!refusesStdin('[{"filepath": "stdin", "violations": []}]'));
+});
+
+test('path mode arguments: the saved file, no stdin; fix writes a marked copy beside it', () => {
+  const f = path.join('proj', 'models', 'a.sql');
+  assert.deepEqual(lintPathArgs(f, 'tsql', ['--rules', 'LT01']), ['lint', f, '--format', 'json', '--disable-progress-bar', '--dialect', 'tsql', '--rules', 'LT01']);
+  const { suffix, copy } = fixCopy(f, '12-3');
+  assert.equal(copy, path.join('proj', 'models', 'a' + suffix + '.sql'));
+  assert.ok(isFixCopy(copy) && !isFixCopy(f));
+  assert.deepEqual(fixPathArgs(f, suffix, undefined, []), ['fix', f, '--fixed-suffix', suffix, '--disable-progress-bar']);
+  // SQLFluff 2.x asks before fixing a path unless -f.
+  assert.deepEqual(fixPathArgs(f, suffix, 'tsql', [], true), ['fix', f, '-f', '--fixed-suffix', suffix, '--disable-progress-bar', '--dialect', 'tsql']);
+});
 
 test('parseLintJson reads SQLFluff 3/4 violations (1-based → 0-based) and older line_no fields', () => {
   const out = JSON.stringify([

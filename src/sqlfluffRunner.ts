@@ -4,17 +4,23 @@ import * as os from 'os';
 import * as path from 'path';
 import { ChildProcess, execFile } from 'child_process';
 import {
-  CONFIG_FILES,
+  CONFIG_FILES_BY_PRIORITY,
   LintViolation,
-  configHasDialect,
+  configCore,
   configSearchDirs,
   dialectFor,
   fixAccepted,
   fixArgs,
+  fixCopy,
+  fixPathArgs,
   fixedText,
   lintArgs,
+  lintPathArgs,
   parseLintJson,
-  sqlfluffExecutable
+  parseSqlfluffVersion,
+  refusesStdin,
+  sqlfluffExecutable,
+  templaterArg
 } from './sqlfluff';
 import { splitArgs } from './dbt';
 import { killTree } from './runner';
@@ -28,7 +34,16 @@ export interface SqlFluffDeps {
 }
 
 type Mode = 'off' | 'on' | 'auto';
-type RunResult = { stdout: string; err?: { code?: number | string | null; killed?: boolean } };
+type RunResult = { stdout: string; stderr: string; err?: { code?: number | string | null; killed?: boolean } };
+type Core = ReturnType<typeof configCore>;
+type FixResult = {
+  edits: vscode.TextEdit[];
+  version: number;
+  changedMeanwhile: boolean;
+  /** Path mode (dbt templater) with unsaved edits: SQLFluff reads the saved file, so save first. */
+  needsSave?: boolean;
+};
+const SAVE_FIRST = 'dbt Commander: save the file first. With the dbt templater, SQLFluff reads the saved file.';
 
 const cfg = () => vscode.workspace.getConfiguration('dbtCommander');
 const SELECTOR: vscode.DocumentSelector = [
@@ -71,7 +86,18 @@ export class SqlFluff implements vscode.Disposable {
   private readonly waiting: (() => void)[] = [];
   private readonly children = new Set<ChildProcess>();
   private readonly resaving = new Set<string>();
-  private readonly configCache = new Map<string, { mtime: number; has: boolean }>();
+  /** Saves whose fix runs once the save is on disk (path mode): document → its version at will-save. */
+  private readonly fixAfterSave = new Map<string, number>();
+  /**
+   * Path mode Format Document on unsaved edits: a save right after it was Format on Save (fix once the save is on
+   * disk); with no save, the "save first" message shows after a moment.
+   */
+  private readonly formatPending = new Map<string, NodeJS.Timeout>();
+  /** SQLFluff's major version per executable (2.x's `fix <path>` asks before fixing unless -f). */
+  private readonly majors = new Map<string, Promise<number | undefined>>();
+  /** Files whose SQLFluff refused stdin (dbt templater set somewhere we don't read): path mode from then on. */
+  private readonly refusedStdin = new Set<string>();
+  private readonly configCache = new Map<string, { mtime: number; core: Core }>();
   private warnedMissing = false;
   private wasActive = false;
   private updateTimer: NodeJS.Timeout | undefined;
@@ -79,16 +105,19 @@ export class SqlFluff implements vscode.Disposable {
   constructor(private readonly deps: SqlFluffDeps) {
     this.disposables.push(
       vscode.workspace.onDidOpenTextDocument(d => this.queueLint(d)),
-      vscode.workspace.onDidSaveTextDocument(d => this.queueLint(d)),
+      vscode.workspace.onDidSaveTextDocument(d => this.onDidSave(d)),
       vscode.workspace.onDidCloseTextDocument(d => {
         this.diagnostics.delete(d.uri);
         this.pending.delete(d.uri.toString());
+        this.fixAfterSave.delete(d.uri.toString());
       }),
       vscode.workspace.onWillSaveTextDocument(e => this.onWillSave(e)),
       vscode.workspace.onDidChangeConfiguration(e => {
         if (e.affectsConfiguration('dbtCommander.sqlfluff') || e.affectsConfiguration('dbtCommander.venvPath')) {
           this.warnedMissing = false;
           this.configCache.clear();
+          this.refusedStdin.clear();
+          this.majors.clear(); // a venv change, or SQLFluff upgraded and the setting saved again
           this.scheduleUpdate(); // one Save in the settings page changes several keys at once
         }
       }),
@@ -143,7 +172,24 @@ export class SqlFluff implements vscode.Disposable {
       return;
     }
     this.formatter ??= vscode.languages.registerDocumentFormattingEditProvider(SELECTOR, {
-      provideDocumentFormattingEdits: async doc => (this.applies(doc) ? (await this.fix(doc)).edits : [])
+      provideDocumentFormattingEdits: async doc => {
+        if (!this.applies(doc) || this.resaving.has(doc.uri.toString())) {
+          return []; // the re-save after a fix: Format on Save would only fix the fix again
+        }
+        const r = await this.fix(doc);
+        if (r.needsSave) {
+          const key = doc.uri.toString();
+          clearTimeout(this.formatPending.get(key));
+          this.formatPending.set(
+            key,
+            setTimeout(() => {
+              this.formatPending.delete(key);
+              void vscode.window.showInformationMessage(SAVE_FIRST);
+            }, 2000)
+          );
+        }
+        return r.edits;
+      }
     });
     vscode.workspace.textDocuments.forEach(d => this.queueLint(d));
   }
@@ -168,32 +214,44 @@ export class SqlFluff implements vscode.Disposable {
     }
   }
 
-  /** Whether a config file in `dir` sets the dialect (cached by mtime). */
-  private async dirSetsDialect(dir: string): Promise<boolean> {
-    for (const name of CONFIG_FILES) {
-      const file = path.join(dir, name);
-      let mtime: number;
+  /** The core-section settings of one config file (cached by mtime); undefined when there is no such file. */
+  private async configFile(file: string, name: string): Promise<Core | undefined> {
+    let mtime: number;
+    try {
+      mtime = (await fs.promises.stat(file)).mtimeMs;
+    } catch {
+      return undefined;
+    }
+    let hit = this.configCache.get(file);
+    if (!hit || hit.mtime !== mtime) {
+      let text = '';
       try {
-        mtime = (await fs.promises.stat(file)).mtimeMs;
+        text = await fs.promises.readFile(file, 'utf8');
       } catch {
-        continue;
+        // unreadable: treat as setting nothing
       }
-      let hit = this.configCache.get(file);
-      if (!hit || hit.mtime !== mtime) {
-        let text = '';
-        try {
-          text = await fs.promises.readFile(file, 'utf8');
-        } catch {
-          // unreadable: treat as no dialect
+      hit = { mtime, core: configCore(name, text) };
+      this.configCache.set(file, hit);
+    }
+    return hit.core;
+  }
+
+  /** The config files SQLFluff reads for `file`, the one whose settings win first. */
+  private async configs(file: string): Promise<Core[]> {
+    const out: Core[] = [];
+    for (const dir of configSearchDirs(file, os.homedir(), userConfigDir())) {
+      for (const name of CONFIG_FILES_BY_PRIORITY) {
+        const core = await this.configFile(path.join(dir, name), name);
+        if (core) {
+          out.push(core);
         }
-        hit = { mtime, has: configHasDialect(name, text) };
-        this.configCache.set(file, hit);
-      }
-      if (hit.has) {
-        return true;
       }
     }
-    return false;
+    return out;
+  }
+
+  private extraArgs(): string[] {
+    return splitArgs(cfg().get<string>('sqlfluff.extraArgs', ''));
   }
 
   /**
@@ -205,22 +263,33 @@ export class SqlFluff implements vscode.Disposable {
     if (set) {
       return set;
     }
-    for (const dir of configSearchDirs(file, os.homedir(), userConfigDir())) {
-      if (await this.dirSetsDialect(dir)) {
-        return undefined;
-      }
+    if ((await this.configs(file)).some(c => c.dialect)) {
+      return undefined;
     }
     return dialectFor(await this.deps.adapterType(root));
   }
 
-  /** Run SQLFluff with `text` on stdin, as `file`. */
-  private async run(file: string, text: string, args: (file: string, dialect: string | undefined, extra: string[]) => string[]): Promise<RunResult | undefined> {
+  /**
+   * Path mode: SQLFluff reads the saved file instead of the editor text on stdin, because the dbt templater
+   * refuses stdin. On when `--templater` in the extra flags, else the nearest config setting `templater`, is dbt,
+   * or when SQLFluff already refused stdin for this file.
+   */
+  async pathMode(file: string): Promise<boolean> {
+    if (this.refusedStdin.has(file.toLowerCase())) {
+      return true;
+    }
+    const templater = templaterArg(this.extraArgs()) ?? (await this.configs(file)).find(c => c.templater)?.templater;
+    return templater === 'dbt';
+  }
+
+  /** Run SQLFluff for `file`; `input` goes to stdin (none in path mode). */
+  private async run(file: string, build: (dialect: string | undefined, extra: string[]) => string[], input?: string): Promise<RunResult | undefined> {
     const exe = this.exe();
     const root = this.deps.projectRootOf(file);
     if (!exe || !root) {
       return undefined;
     }
-    const argv = args(file, await this.dialect(file, root), splitArgs(cfg().get<string>('sqlfluff.extraArgs', '')));
+    const argv = build(await this.dialect(file, root), this.extraArgs());
     return this.slot(
       () =>
         new Promise<RunResult>(resolve => {
@@ -229,16 +298,45 @@ export class SqlFluff implements vscode.Disposable {
             argv,
             // UTF-8: SQLFluff prints non-ASCII (and emoji) that the Windows code page can't encode.
             { cwd: root, timeout: 120_000, maxBuffer: 32 * 1024 * 1024, windowsHide: true, env: { ...process.env, PYTHONIOENCODING: 'utf-8' } },
-            (err, stdout) => {
+            (err, stdout, stderr) => {
               this.children.delete(child);
-              resolve({ stdout, ...(err ? { err: { code: (err as any).code, killed: err.killed } } : {}) });
+              resolve({ stdout, stderr: String(stderr ?? ''), ...(err ? { err: { code: (err as any).code, killed: err.killed } } : {}) });
             }
           );
           this.children.add(child);
           child.stdin?.on('error', () => undefined); // SQLFluff exited before reading everything
-          child.stdin?.end(text, 'utf8');
+          child.stdin?.end(input ?? '', 'utf8');
         })
     );
+  }
+
+  /** SQLFluff's major version (`sqlfluff --version`, once per executable); undefined when it can't be read. */
+  private major(): Promise<number | undefined> {
+    const exe = this.exe();
+    if (!exe) {
+      return Promise.resolve(undefined);
+    }
+    let hit = this.majors.get(exe);
+    if (!hit) {
+      hit = new Promise(resolve =>
+        execFile(exe, ['--version'], { timeout: 30_000, windowsHide: true }, (err, stdout) => {
+          const v = err ? undefined : parseSqlfluffVersion(String(stdout));
+          resolve(v ? Number(v.split('.')[0]) : undefined);
+        })
+      );
+      this.majors.set(exe, hit);
+    }
+    return hit;
+  }
+
+  /** A stdin run SQLFluff refused (dbt templater): remember it, so this file uses path mode from now on. */
+  private refused(file: string, result: RunResult | undefined): boolean {
+    // stderr only, and only a failed run: `fix -` prints the user's SQL on stdout, which could hold the phrase.
+    if (result?.err && refusesStdin(result.stderr)) {
+      this.refusedStdin.add(file.toLowerCase());
+      return true;
+    }
+    return false;
   }
 
   // ---------- lint ----------
@@ -276,7 +374,17 @@ export class SqlFluff implements vscode.Disposable {
     const id = ++this.counter;
     this.latest.set(key, id);
     const version = doc.version;
-    const result = await this.run(doc.uri.fsPath, doc.getText(), lintArgs);
+    const file = doc.uri.fsPath;
+    let result: RunResult | undefined;
+    if (!(await this.pathMode(file))) {
+      result = await this.run(file, (d, x) => lintArgs(file, d, x), doc.getText());
+    }
+    if (!result || this.refused(file, result)) {
+      if (doc.isDirty) {
+        return null; // path mode lints the saved file: the next save lints these edits
+      }
+      result = await this.run(file, (d, x) => lintPathArgs(file, d, x));
+    }
     if (this.latest.get(key) !== id || !this.active || doc.isClosed) {
       return null;
     }
@@ -305,20 +413,58 @@ export class SqlFluff implements vscode.Disposable {
   // ---------- fix ----------
 
   /** SQLFluff's fix of the document as one edit (empty: nothing to change, failed, or the text changed meanwhile). */
-  private async fix(doc: vscode.TextDocument): Promise<{ edits: vscode.TextEdit[]; version: number; changedMeanwhile: boolean }> {
+  private async fix(doc: vscode.TextDocument): Promise<FixResult> {
     const before = doc.getText();
     const version = doc.version;
-    const result = await this.run(doc.uri.fsPath, before, fixArgs);
+    const file = doc.uri.fsPath;
+    if (await this.pathMode(file)) {
+      return this.fixPath(doc);
+    }
+    const result = await this.run(file, (d, x) => fixArgs(file, d, x), before);
+    if (this.refused(file, result)) {
+      return this.fixPath(doc);
+    }
     const changedMeanwhile = doc.version !== version;
-    const after =
-      result && fixAccepted(result.err) && !changedMeanwhile
-        ? fixedText(result.stdout, before, doc.eol === vscode.EndOfLine.CRLF ? '\r\n' : '\n')
-        : undefined;
-    return {
-      edits: after ? [vscode.TextEdit.replace(new vscode.Range(doc.positionAt(0), doc.positionAt(before.length)), after)] : [],
-      version,
-      changedMeanwhile
-    };
+    const after = result && fixAccepted(result.err) && !changedMeanwhile ? fixedText(result.stdout, before, this.eol(doc)) : undefined;
+    return { edits: this.replaceAll(doc, before, after), version, changedMeanwhile };
+  }
+
+  private eol(doc: vscode.TextDocument): '\n' | '\r\n' {
+    return doc.eol === vscode.EndOfLine.CRLF ? '\r\n' : '\n';
+  }
+
+  private replaceAll(doc: vscode.TextDocument, before: string, after: string | undefined): vscode.TextEdit[] {
+    return after ? [vscode.TextEdit.replace(new vscode.Range(doc.positionAt(0), doc.positionAt(before.length)), after)] : [];
+  }
+
+  /**
+   * Path mode fix: SQLFluff fixes the saved file and writes the result to a copy beside it (the file itself is
+   * left alone); the copy's text comes back as one edit and the copy is deleted.
+   */
+  private async fixPath(doc: vscode.TextDocument): Promise<FixResult> {
+    const before = doc.getText();
+    const version = doc.version;
+    if (doc.isDirty) {
+      return { edits: [], version, changedMeanwhile: false, needsSave: true };
+    }
+    const file = doc.uri.fsPath;
+    const { suffix, copy } = fixCopy(file, `${process.pid}-${++this.counter}`);
+    let fixed: string | undefined;
+    let result: RunResult | undefined;
+    try {
+      const major = await this.major();
+      result = await this.run(file, (d, x) => fixPathArgs(file, suffix, d, x, major !== undefined && major < 3));
+      try {
+        fixed = (await fs.promises.readFile(copy, 'utf8')).replace(/^﻿/, ''); // no copy: nothing to fix
+      } catch {
+        fixed = undefined;
+      }
+    } finally {
+      await fs.promises.rm(copy, { force: true }).catch(() => undefined);
+    }
+    const changedMeanwhile = doc.version !== version || doc.isDirty;
+    const after = result && fixAccepted(result.err) && fixed !== undefined && !changedMeanwhile ? fixedText(fixed, before, this.eol(doc)) : undefined;
+    return { edits: this.replaceAll(doc, before, after), version, changedMeanwhile };
   }
 
   /**
@@ -329,36 +475,83 @@ export class SqlFluff implements vscode.Disposable {
   private onWillSave(e: vscode.TextDocumentWillSaveEvent): void {
     const doc = e.document;
     const key = doc.uri.toString();
-    if (this.resaving.has(key) || e.reason !== vscode.TextDocumentSaveReason.Manual || !cfg().get<boolean>('sqlfluff.fixOnSave', false) || !this.applies(doc)) {
+    if (this.resaving.has(key)) {
+      return;
+    }
+    this.fixAfterSave.delete(key); // left from a save that never completed
+    if (e.reason !== vscode.TextDocumentSaveReason.Manual || !cfg().get<boolean>('sqlfluff.fixOnSave', false) || !this.applies(doc)) {
       return;
     }
     const pending = this.fix(doc);
     const budget = new Promise<typeof LATE>(resolve => setTimeout(() => resolve(LATE), WILL_SAVE_BUDGET_MS));
     e.waitUntil(
       Promise.race([pending, budget]).then(r => {
-        if (r !== LATE) {
-          return r.edits;
+        if (r === LATE) {
+          void this.applyLate(doc, pending);
+          return [];
         }
-        void this.applyLate(doc, pending);
-        return [];
+        if (r.needsSave) {
+          this.fixAfterSave.set(key, r.version); // path mode: fix the file once this save is on disk
+        }
+        return r.edits;
       })
     );
   }
 
-  private async applyLate(doc: vscode.TextDocument, pending: ReturnType<SqlFluff['fix']>): Promise<void> {
-    const { edits, version } = await pending;
-    if (!edits.length || doc.isClosed || doc.version !== version) {
+  private onDidSave(doc: vscode.TextDocument): void {
+    const key = doc.uri.toString();
+    if (this.resaving.has(key)) {
       return;
     }
-    const key = doc.uri.toString();
+    const formatOnSave = this.formatPending.get(key);
+    if (formatOnSave) {
+      clearTimeout(formatOnSave);
+      this.formatPending.delete(key);
+    }
+    const marked = this.fixAfterSave.get(key);
+    this.fixAfterSave.delete(key);
+    if ((formatOnSave || marked === doc.version) && this.applies(doc)) {
+      // Lint after the fix: its re-save lints, or (nothing to fix) lint now. Two dbt templater runs at once are slow.
+      void this.applyLate(doc, this.fix(doc)).then(saved => saved || this.queueLint(doc));
+      return;
+    }
+    this.queueLint(doc);
+  }
+
+  /** Apply a fix that missed the will-save budget and save again. True when it did. */
+  private async applyLate(doc: vscode.TextDocument, pending: Promise<FixResult>): Promise<boolean> {
+    let r = await pending;
+    if (r.needsSave) {
+      // Path mode found out late (SQLFluff refused stdin): fix the saved file once the save is done.
+      if (doc.isClosed || doc.version !== r.version) {
+        return false;
+      }
+      if (doc.isDirty) {
+        this.fixAfterSave.set(doc.uri.toString(), r.version); // the save is still writing: onDidSave fixes
+        return false;
+      }
+      r = await this.fix(doc);
+    }
+    const { edits, version } = r;
+    if (!edits.length || doc.isClosed || doc.version !== version) {
+      return false;
+    }
     const edit = new vscode.WorkspaceEdit();
     edit.set(doc.uri, edits);
     if (!(await vscode.workspace.applyEdit(edit)) || doc.version !== version + 1) {
-      return;
+      return false;
     }
+    await this.saveQuietly(doc);
+    this.queueLint(doc);
+    return true;
+  }
+
+  /** Save without fix on save or the lint a save starts (the caller runs what it needs). */
+  private async saveQuietly(doc: vscode.TextDocument): Promise<boolean> {
+    const key = doc.uri.toString();
     this.resaving.add(key);
     try {
-      await doc.save();
+      return await doc.save();
     } finally {
       this.resaving.delete(key);
     }
@@ -379,9 +572,31 @@ export class SqlFluff implements vscode.Disposable {
     return doc;
   }
 
+  /** Path mode reads the saved file: the commands save unsaved edits first. False when that save failed. */
+  private async savedForPathMode(doc: vscode.TextDocument): Promise<boolean> {
+    if (!doc.isDirty || !(await this.pathMode(doc.uri.fsPath))) {
+      return true;
+    }
+    if (await this.saveQuietly(doc)) {
+      return true;
+    }
+    void vscode.window.showWarningMessage(SAVE_FIRST);
+    return false;
+  }
+
   private async lintCommand(): Promise<LintViolation[] | undefined | null> {
     const doc = this.activeDoc();
-    const result = doc && (await this.lint(doc));
+    if (doc && !(await this.savedForPathMode(doc))) {
+      return null;
+    }
+    let result = doc && (await this.lint(doc));
+    if (doc && result === null && doc.isDirty && (await this.pathMode(doc.uri.fsPath))) {
+      // SQLFluff refused stdin just now: path mode from here on, so save and lint the saved file.
+      if (!(await this.savedForPathMode(doc))) {
+        return null;
+      }
+      result = await this.lint(doc);
+    }
     if (doc && result === undefined) {
       void vscode.window.showWarningMessage('dbt Commander: SQLFluff did not return results for this file. Run it in a terminal to see why.');
     } else if (result) {
@@ -393,10 +608,18 @@ export class SqlFluff implements vscode.Disposable {
   /** Fix the active file now (one undo step). */
   async fixCommand(): Promise<boolean> {
     const doc = this.activeDoc();
-    if (!doc) {
+    if (!doc || !(await this.savedForPathMode(doc))) {
       return false;
     }
-    const { edits, changedMeanwhile } = await this.fix(doc);
+    let r = await this.fix(doc);
+    if (r.needsSave) {
+      // SQLFluff refused stdin just now: path mode from here on, so save and fix the saved file.
+      if (!(await this.savedForPathMode(doc))) {
+        return false;
+      }
+      r = await this.fix(doc);
+    }
+    const { edits, changedMeanwhile } = r;
     if (!edits.length) {
       void vscode.window.setStatusBarMessage(changedMeanwhile ? 'SQLFluff: the file changed while fixing — run it again' : 'SQLFluff: nothing to fix', 4000);
       return false;
@@ -408,6 +631,7 @@ export class SqlFluff implements vscode.Disposable {
 
   dispose(): void {
     clearTimeout(this.updateTimer);
+    this.formatPending.forEach(t => clearTimeout(t));
     this.children.forEach(c => killTree(c));
     this.formatter?.dispose();
     this.disposables.forEach(d => d.dispose());
