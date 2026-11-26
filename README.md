@@ -181,7 +181,8 @@ In a SQL scratchpad, `Ctrl+Enter` runs the query (or the selection).
 - **Build SCD2 Chain** — right-click a `stg_` model → `dbt build` of that model, its change-key model, the
   `__candidate` / `__history` / `__published` models and the `__gates` test, and nothing further downstream
   (several `stg_` files selected: all their chains in one build). Names
-  follow `dbtCommander.scd2.historyPrefix`; `--indirect-selection buildable` leaves out tests that also read a
+  follow `dbtCommander.scd2.historyPrefix`, with `__` or `_` before the suffix (`int_ace__stringmap_changekey`
+  works too); `--indirect-selection buildable` leaves out tests that also read a
   model past the chain.
 - **Add Seed as Source…** — right-click seed CSVs → adds them as tables of a source (default `bronze`) with the CSV
   header as columns, so you can build staging models on sample data. Run *dbt seed* to load them.

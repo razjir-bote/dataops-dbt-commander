@@ -69,11 +69,27 @@ export function scd2GeneratedModels(stagingModel: string, rules: Scd2Rules): { n
 
 /**
  * The SCD2 chain fed by a staging model, in build order: the staging model, its change-key model, the
- * candidate / history / published models and the gates test. Empty for a non-staging name.
+ * candidate / history / published models and the gates test. Each piece may be spelled with `__` or `_` before
+ * its suffix (`int_ace__x__changekey` or `int_ace__x_changekey`): `known` gives a node's actual name if the project
+ * has it; a piece it doesn't know gets both spellings (dbt skips the one that doesn't exist). Empty for a
+ * non-staging name.
  */
-export function scd2ChainNames(stagingModel: string, rules: Scd2Rules): string[] {
-  const names = changeKeyNames(stagingModel, rules);
-  return names ? [stagingModel, names.model, ...scd2GeneratedModels(stagingModel, rules).map(g => g.name)] : [];
+export function scd2ChainNames(stagingModel: string, rules: Scd2Rules, known: (name: string) => string | undefined = () => undefined): string[] {
+  const m = /^stg_(.+)$/i.exec(stagingModel);
+  if (!m) {
+    return [];
+  }
+  const pieces: [base: string, suffix: string][] = [
+    [`int_${m[1]}`, 'changekey'],
+    ...SCD2_STAGES.map((st): [string, string] => [`${rules.historyPrefix}${m[1]}`, st.suffix])
+  ];
+  const names = [stagingModel];
+  for (const [base, suffix] of pieces) {
+    const spellings = [`${base}__${suffix}`, `${base}_${suffix}`];
+    const found = spellings.map(known).filter((n): n is string => !!n);
+    names.push(...(found.length ? found : spellings));
+  }
+  return [...new Set(names)];
 }
 
 // ---------- the scd2_dimensions entry in vars.yaml ----------

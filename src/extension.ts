@@ -348,6 +348,29 @@ async function runDbt(action: DbtAction, graph: GraphScope, uri?: vscode.Uri, ur
   });
 }
 
+/** Every .sql file's name (without .sql) under these folders, by lower-cased name. */
+function sqlNamesUnder(dirs: string[]): Map<string, string> {
+  const names = new Map<string, string>();
+  const walk = (dir: string) => {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      if (e.isDirectory()) {
+        walk(path.join(dir, e.name));
+      } else if (/\.sql$/i.test(e.name)) {
+        const name = e.name.slice(0, -4);
+        names.set(name.toLowerCase(), name);
+      }
+    }
+  };
+  dirs.forEach(walk);
+  return names;
+}
+
 /**
  * Build staging models and their SCD2 chains (change key, candidate, history, published, gates), nothing further
  * down. Several selected in the Explorer: every chain in one dbt build.
@@ -364,7 +387,11 @@ async function buildScd2Chain(target?: unknown, targets?: vscode.Uri[]): Promise
     void vscode.window.showErrorMessage(`dbt Commander: Build SCD2 Chain needs staging models (stg_….sql); ${notStaging.join(', ')} isn't one.`);
     return;
   }
-  const names = [...new Set(staging.flatMap(m => scd2ChainNames(m, scd2Rules())))];
+  // The project's own spelling of each piece (int_x__changekey or int_x_changekey …): its .sql file on disk under
+  // the model and test paths (not the manifest, which can be stale or name a package's model).
+  const onDisk = sqlNamesUnder([...pathsOf(sel.root).model, ...pathsOf(sel.root).test].map(p => path.join(sel.root, p)));
+  const known = (n: string) => onDisk.get(n.toLowerCase());
+  const names = [...new Set(staging.flatMap(m => scd2ChainNames(m, scd2Rules(), known)))];
   const exe = await requireExe();
   if (!exe) {
     return;

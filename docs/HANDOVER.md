@@ -1,7 +1,7 @@
 # DataOps dbt Commander — developer handover
 
 Keep this file current: update it in the same commit as any change to features, architecture, build/release
-process, or known issues. Last updated: 2026-11-26 (v0.17.0 released).
+process, or known issues. Last updated: 2026-11-26 (v0.17.1 released).
 
 ## What this is
 A VS Code extension (TypeScript) for working with **dbt-core 1.x** (tested with 1.12.7) on **Windows**, running
@@ -14,6 +14,12 @@ Since v0.9.0 the extension ID is `local.dataops-dbt-commander` and every command
 is `dbtCommander.*`; `migrate.ts` copies old `dbtRunner.*` user and workspace settings once on activation.
 
 ## Status
+- **v0.17.1 — released** (https://github.com/razjir-bote/dataops-dbt-commander/releases/tag/v0.17.1) — **Build SCD2 Chain finds `_changekey` too.** Projects name the change key `int_<src>__<entity>_changekey`
+  (one underscore, from before the v0.14 rename). `scd2ChainNames(stg, rules, known)` tries `__<suffix>` and
+  `_<suffix>` for every piece; `known` is the `.sql` files on disk under model-paths + test-paths (`sqlNamesUnder` in
+  extension.ts, case-insensitive, returns the file's own casing) — not the manifest, which can be stale (a renamed
+  model) or list package models. Only a piece with neither file gets both spellings: dbt warns about each name that
+  matches nothing, and under `--warn-error` / `warn_error_options` aborts the whole build before anything runs.
 - **v0.17.0 — released** (https://github.com/razjir-bote/dataops-dbt-commander/releases/tag/v0.17.0) — **Build SCD2 Chain.** Right-click a `stg_` model (Explorer, editor, sidebar `model-stg`; `2_graph@4`)
   → `dbtCommander.buildScd2Chain`: `dbt build --select <stg> <int_…__changekey> <dim_…__candidate> <__history>
   <__published> <__gates> --indirect-selection buildable` (`scd2ChainNames` in scd2.ts, `chainBuildArgs` in dbt.ts).

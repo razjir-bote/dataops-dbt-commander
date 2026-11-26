@@ -222,17 +222,21 @@ test('addScd2Dimension: a BOM is kept; a nested name: is not the entry name; odd
   assert.deepEqual(scd2DimensionLines(dim('dim_a', 'int a: b')).slice(0, 2), ['- name: dim_a', "  source: 'int a: b'"]);
 });
 
-test('scd2ChainNames: staging, change key, candidate, history, published, gates; prefix from settings', () => {
+test('scd2ChainNames: unknown to the project → both spellings of each piece; prefix from settings', () => {
   assert.deepEqual(scd2ChainNames('stg_crm__customer', SCD2_DEFAULTS), [
     'stg_crm__customer',
     'int_crm__customer__changekey',
+    'int_crm__customer_changekey',
     'dim_crm__customer__candidate',
+    'dim_crm__customer_candidate',
     'dim_crm__customer__history',
+    'dim_crm__customer_history',
     'dim_crm__customer__published',
-    'dim_crm__customer__gates'
+    'dim_crm__customer_published',
+    'dim_crm__customer__gates',
+    'dim_crm__customer_gates'
   ]);
-  assert.deepEqual(scd2ChainNames('stg_a', { ...SCD2_DEFAULTS, historyPrefix: 'scd_' }), [
-    'stg_a',
+  assert.deepEqual(scd2ChainNames('stg_a', { ...SCD2_DEFAULTS, historyPrefix: 'scd_' }).filter((_, i) => i % 2 === 1), [
     'int_a__changekey',
     'scd_a__candidate',
     'scd_a__history',
@@ -240,4 +244,13 @@ test('scd2ChainNames: staging, change key, candidate, history, published, gates;
     'scd_a__gates'
   ]);
   assert.deepEqual(scd2ChainNames('orders', SCD2_DEFAULTS), [], 'not a staging model');
+});
+
+test('scd2ChainNames: names the project has are used as they are, one spelling each', () => {
+  const project = ['int_ace__stringmap_changekey', 'dim_ace__stringmap__candidate', 'dim_ace__stringmap__history', 'dim_ace__stringmap__published', 'dim_ace__stringmap__gates'];
+  const known = (n: string) => project.find(p => p.toLowerCase() === n.toLowerCase());
+  assert.deepEqual(scd2ChainNames('stg_ace__stringmap', SCD2_DEFAULTS, known), ['stg_ace__stringmap', ...project]);
+  // A piece the project lacks (no gates test yet): both spellings, dbt skips them.
+  const noGates = (n: string) => (/gates$/.test(n) ? undefined : known(n));
+  assert.deepEqual(scd2ChainNames('stg_ace__stringmap', SCD2_DEFAULTS, noGates).slice(-2), ['dim_ace__stringmap__gates', 'dim_ace__stringmap_gates']);
 });
