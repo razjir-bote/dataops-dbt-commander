@@ -118,6 +118,14 @@ export function buildArgs(action: DbtAction, selectors: string[], target: string
   return [action, ...(selectors.length ? ['--select', ...selectors] : []), ...flagArgs(target, extraArgs)];
 }
 
+/**
+ * `dbt build` of exactly these nodes. `--indirect-selection buildable` keeps out tests that also read a model
+ * past them (neither listed nor upstream of the list); a later `--indirect-selection` in the extra args wins.
+ */
+export function chainBuildArgs(names: string[], target: string, extraArgs: string): string[] {
+  return ['build', '--select', ...names, '--indirect-selection', 'buildable', ...flagArgs(target, extraArgs)];
+}
+
 const samePath = (a: string, b: string) => path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
 
 /**

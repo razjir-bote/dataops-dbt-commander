@@ -68,7 +68,7 @@ the settings page. See [Linting](#linting-sqlfluff-optional).
 |---|---|
 | **Status bar** | **dbt** (version, menu of project commands: deps, seed, snapshot, docs generate, retry, check connection, settings) · **target** switcher · **dbt parse** while the background parse runs |
 | **dbt sidebar** (Activity Bar) | **Project** (models, sources, seeds, snapshots, tests, exposures, semantic models — with run buttons), **Lineage** (upstream / downstream of the open model), **Last run** (the latest run's results, slowest first) |
-| **Right-click → dbt ▸** | The one list, the same everywhere (Explorer, editor tab, inside the editor, sidebar, Lineage), showing only what applies: Run · Build · Test · Seed · Snapshot · Run Test — Build + Upstream / + Downstream / + Upstream & Downstream — Compile · Copy Compiled SQL · Preview Data · Preview Selection / CTE · Show Lineage · Open in dbt Docs — Generate YAML · New Model… · Create Staging Model · Create SCD2 Models and Gates Test… · Add Seed as Source… — Rename Model… — SQLFluff: Lint File · Fix File — Open Settings |
+| **Right-click → dbt ▸** | The one list, the same everywhere (Explorer, editor tab, inside the editor, sidebar, Lineage), showing only what applies: Run · Build · Test · Seed · Snapshot · Run Test — Build + Upstream / + Downstream / + Upstream & Downstream · Build SCD2 Chain — Compile · Copy Compiled SQL · Preview Data · Preview Selection / CTE · Show Lineage · Open in dbt Docs — Generate YAML · New Model… · Create Staging Model · Create SCD2 Models and Gates Test… · Add Seed as Source… — Rename Model… — SQLFluff: Lint File · Fix File — Open Settings |
 | **Editor title** | ▶ builds the open model (saves first) / seeds the open seed CSV |
 | **Above each model** | Run · Build · Test · Compile · Preview, and the last result (`✓ 3m ago · 1.2s`) |
 | **Testing view** | Every dbt test, with run buttons and pass / fail |
@@ -178,6 +178,11 @@ In a SQL scratchpad, `Ctrl+Enter` runs the query (or the selection).
   - the dimension's entry in `scd2_dimensions:` in `vars.yaml`.
 
   Existing files and entries are kept; a missing `scd2_*` macro is reported. Settings: `dbtCommander.scd2.*`.
+- **Build SCD2 Chain** — right-click a `stg_` model → `dbt build` of that model, its change-key model, the
+  `__candidate` / `__history` / `__published` models and the `__gates` test, and nothing further downstream
+  (several `stg_` files selected: all their chains in one build). Names
+  follow `dbtCommander.scd2.historyPrefix`; `--indirect-selection buildable` leaves out tests that also read a
+  model past the chain.
 - **Add Seed as Source…** — right-click seed CSVs → adds them as tables of a source (default `bronze`) with the CSV
   header as columns, so you can build staging models on sample data. Run *dbt seed* to load them.
 

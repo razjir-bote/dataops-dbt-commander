@@ -2,7 +2,7 @@
   "name": "dataops-dbt-commander",
   "displayName": "DataOps dbt Commander",
   "description": "Run, build, test, compile and preview dbt models from the VS Code Explorer and editor with dbt-core 1.x from a configured venv.",
-  "version": "0.16.1",
+  "version": "0.17.0",
   "publisher": "local",
   "license": "MIT",
   "engines": {
@@ -46,6 +46,11 @@
       {
         "command": "dbtCommander.buildUpDownstream",
         "title": "Build + Upstream & Downstream",
+        "category": "dbt Commander"
+      },
+      {
+        "command": "dbtCommander.buildScd2Chain",
+        "title": "Build SCD2 Chain",
         "category": "dbt Commander"
       },
       {
@@ -351,6 +356,11 @@
           "group": "2_graph@3"
         },
         {
+          "command": "dbtCommander.buildScd2Chain",
+          "when": "!explorerResourceIsFolder && resourceExtname =~ /^\\.sql$/i && resourceFilename =~ /^stg_.*\\.sql$/i",
+          "group": "2_graph@4"
+        },
+        {
           "command": "dbtCommander.compile",
           "when": "!explorerResourceIsFolder && resourceExtname =~ /^\\.sql$/i",
           "group": "3_inspect@1"
@@ -429,6 +439,10 @@
         {
           "command": "dbtCommander.buildUpDownstream",
           "when": "editorIsOpen && resourceExtname =~ /^\\.sql$/i && (resourcePath =~ /[\\\\/]models([\\\\/]|$)/i || resourcePath in dbtCommander.modelPaths) && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i"
+        },
+        {
+          "command": "dbtCommander.buildScd2Chain",
+          "when": "editorIsOpen && resourceScheme == file && resourceExtname =~ /^\\.sql$/i && (resourcePath =~ /[\\\\/]models([\\\\/]|$)/i || resourcePath in dbtCommander.modelPaths) && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i && resourceFilename =~ /^stg_.*\\.sql$/i"
         },
         {
           "command": "dbtCommander.compile",
@@ -671,6 +685,11 @@
           "group": "2_graph@3"
         },
         {
+          "command": "dbtCommander.buildScd2Chain",
+          "when": "view == dbtCommander.project && viewItem == model-stg",
+          "group": "2_graph@4"
+        },
+        {
           "command": "dbtCommander.compile",
           "when": "view == dbtCommander.project && viewItem =~ /^model(-stg)?$/",
           "group": "3_inspect@1"
@@ -788,6 +807,11 @@
           "command": "dbtCommander.buildUpDownstream",
           "when": "resourceScheme == file && resourceExtname =~ /^\\.sql$/i && (resourcePath =~ /[\\\\/]models([\\\\/]|$)/i || resourcePath in dbtCommander.modelPaths) && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i",
           "group": "2_graph@3"
+        },
+        {
+          "command": "dbtCommander.buildScd2Chain",
+          "when": "resourceScheme == file && resourceExtname =~ /^\\.sql$/i && (resourcePath =~ /[\\\\/]models([\\\\/]|$)/i || resourcePath in dbtCommander.modelPaths) && resourcePath not =~ /[\\\\/](dbt_packages|target)([\\\\/]|$)/i && resourceFilename =~ /^stg_.*\\.sql$/i",
+          "group": "2_graph@4"
         },
         {
           "command": "dbtCommander.compile",

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { HASH_COLUMNS_MACRO, SCD2_DEFAULTS, addScd2Dimension, changeKeyNames, changeKeySql, scd2Dimension, scd2DimensionLines, scd2GeneratedModels } from '../scd2';
+import { HASH_COLUMNS_MACRO, SCD2_DEFAULTS, addScd2Dimension, changeKeyNames, changeKeySql, scd2Dimension, scd2ChainNames, scd2DimensionLines, scd2GeneratedModels } from '../scd2';
 
 test('changeKeyNames from the staging model name', () => {
   assert.deepEqual(changeKeyNames('stg_ace__aus_accounttag', SCD2_DEFAULTS), {
@@ -220,4 +220,24 @@ test('addScd2Dimension: a BOM is kept; a nested name: is not the entry name; odd
   const nested = 'scd2_dimensions:\n  - name: x\n    other:\n      name: dim_ace__msdynmkt_segment\n';
   assert.equal(addScd2Dimension(nested, dim()).status, 'added');
   assert.deepEqual(scd2DimensionLines(dim('dim_a', 'int a: b')).slice(0, 2), ['- name: dim_a', "  source: 'int a: b'"]);
+});
+
+test('scd2ChainNames: staging, change key, candidate, history, published, gates; prefix from settings', () => {
+  assert.deepEqual(scd2ChainNames('stg_crm__customer', SCD2_DEFAULTS), [
+    'stg_crm__customer',
+    'int_crm__customer__changekey',
+    'dim_crm__customer__candidate',
+    'dim_crm__customer__history',
+    'dim_crm__customer__published',
+    'dim_crm__customer__gates'
+  ]);
+  assert.deepEqual(scd2ChainNames('stg_a', { ...SCD2_DEFAULTS, historyPrefix: 'scd_' }), [
+    'stg_a',
+    'int_a__changekey',
+    'scd_a__candidate',
+    'scd_a__history',
+    'scd_a__published',
+    'scd_a__gates'
+  ]);
+  assert.deepEqual(scd2ChainNames('orders', SCD2_DEFAULTS), [], 'not a staging model');
 });

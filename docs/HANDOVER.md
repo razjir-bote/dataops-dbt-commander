@@ -1,7 +1,7 @@
 # DataOps dbt Commander — developer handover
 
 Keep this file current: update it in the same commit as any change to features, architecture, build/release
-process, or known issues. Last updated: 2026-11-24 (v0.16.1 released).
+process, or known issues. Last updated: 2026-11-26 (v0.17.0 released).
 
 ## What this is
 A VS Code extension (TypeScript) for working with **dbt-core 1.x** (tested with 1.12.7) on **Windows**, running
@@ -14,6 +14,12 @@ Since v0.9.0 the extension ID is `local.dataops-dbt-commander` and every command
 is `dbtCommander.*`; `migrate.ts` copies old `dbtRunner.*` user and workspace settings once on activation.
 
 ## Status
+- **v0.17.0 — released** (https://github.com/razjir-bote/dataops-dbt-commander/releases/tag/v0.17.0) — **Build SCD2 Chain.** Right-click a `stg_` model (Explorer, editor, sidebar `model-stg`; `2_graph@4`)
+  → `dbtCommander.buildScd2Chain`: `dbt build --select <stg> <int_…__changekey> <dim_…__candidate> <__history>
+  <__published> <__gates> --indirect-selection buildable` (`scd2ChainNames` in scd2.ts, `chainBuildArgs` in dbt.ts).
+  Explicit names, not `stg+`, so nothing past the chain runs; `buildable` keeps out tests that also read a model past
+  it; a user's own `--indirect-selection` in extra args comes later and wins. Missing names: dbt warns, builds the rest (fails under `--warn-error`). Explorer multi-select: every
+  selected `stg_` chain in one build; any non-`stg_` file in the selection → error, nothing runs.
 - **v0.16.1 — released** (https://github.com/razjir-bote/dataops-dbt-commander/releases/tag/v0.16.1) — **SQLFluff path mode for the dbt templater.** sqlfluff-templater-dbt raises "does not support
   stdin input" whenever `fname == "stdin"` — and `lint -` / `fix -` always pass `"stdin"`, `--stdin-filename` only
   picks the config. So `SqlFluff.pathMode(file)` (sqlfluffRunner.ts): `--templater` in `sqlfluff.extraArgs`, else the
@@ -207,7 +213,7 @@ npm run package              # esbuild → dist/extension.js, then vsce → .vsi
   `npm run test:integration:serial` (or `--serial`) runs every step in one VS Code, in order, as before.
   Groups are lists of suite sections (`await section('v08')`) in `groups.js`; every group after the first starts with
   a setup step (seed, build, docs generate) standing in for what earlier steps left behind. A new step goes in a
-  section; a new section must be added to a group. Rebalance with the step times. Currently 76 checks (+ 3 setup
+  section; a new section must be added to a group. Rebalance with the step times. Currently 77 checks (+ 3 setup
   steps in parallel runs). The suite talks to the extension through the API returned by `activate()`.
 - **CI** (`.github/workflows/ci.yml`): windows-latest, Node 22, Python 3.12; typecheck, unit, integration,
   package. A pushed tag `vX.Y.Z` that equals `package.json` version publishes a GitHub release with the vsix.

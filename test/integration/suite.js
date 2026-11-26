@@ -1401,6 +1401,43 @@ exports.run = async () => {
     }
   });
 
+  await step('Build SCD2 Chain: the staging model, change key, candidate, history, published and gates; nothing further down', async () => {
+    const gen = (...p) => file('models', 'intermediate', ...p);
+    const write = (f, text) => {
+      fs.mkdirSync(path.dirname(f), { recursive: true });
+      fs.writeFileSync(f, text);
+    };
+    // duckdb stand-ins for the chain, plus a model past it and a test that also reads that model.
+    write(gen('changekey', 'int_a__changekey.sql'), "select * from {{ ref('stg_a') }}\n");
+    write(gen('scd2', 'generated', 'dim_a__candidate.sql'), "select * from {{ ref('int_a__changekey') }}\n");
+    write(gen('scd2', 'generated', 'dim_a__history.sql'), "select * from {{ ref('dim_a__candidate') }}\n");
+    write(gen('scd2', 'generated', 'dim_a__published.sql'), "select * from {{ ref('dim_a__history') }}\n");
+    write(gen('zz_beyond.sql'), "select * from {{ ref('dim_a__published') }}\n");
+    write(file('tests', 'scd2', 'generated', 'dim_a__gates.sql'), "select * from {{ ref('dim_a__published') }} where 1 = 0\n");
+    write(file('tests', 'scd2', 'zz_beyond_check.sql'), "select * from {{ ref('dim_a__published') }} p join {{ ref('zz_beyond') }} z on 1 = 0\n");
+    try {
+      await vscode.commands.executeCommand('dbtCommander.buildScd2Chain', uri('models', 'staging', 'stg_a.sql'));
+      const r = results();
+      assert.deepEqual(r.filter(x => x.startsWith('model.')), [
+        'model.demo.dim_a__candidate',
+        'model.demo.dim_a__history',
+        'model.demo.dim_a__published',
+        'model.demo.int_a__changekey',
+        'model.demo.stg_a'
+      ]);
+      assert.ok(r.includes('test.demo.dim_a__gates'), r.join());
+      assert.ok(!r.some(x => /zz_beyond/.test(x)), `nothing past the chain: ${r.join()}`);
+      // Not a staging model: an error, nothing run.
+      fs.rmSync(file('target', 'run_results.json'), { force: true });
+      await vscode.commands.executeCommand('dbtCommander.buildScd2Chain', uri('models', 'b.sql'));
+      assert.ok(!fs.existsSync(file('target', 'run_results.json')), 'ran dbt for a non-staging model');
+    } finally {
+      await closeAll();
+      fs.rmSync(file('models', 'intermediate'), { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+      fs.rmSync(file('tests', 'scd2'), { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    }
+  });
+
   // ----- v0.15: seed as source -----
   await section('v15');
 

@@ -67,6 +67,15 @@ export function scd2GeneratedModels(stagingModel: string, rules: Scd2Rules): { n
   return SCD2_STAGES.map(s => ({ name: `${dim}__${s.suffix}`, macro: s.macro, sql: `{{ ${s.macro}(${lit(dim)}) }}\n`, ...(s.test ? { test: true } : {}) }));
 }
 
+/**
+ * The SCD2 chain fed by a staging model, in build order: the staging model, its change-key model, the
+ * candidate / history / published models and the gates test. Empty for a non-staging name.
+ */
+export function scd2ChainNames(stagingModel: string, rules: Scd2Rules): string[] {
+  const names = changeKeyNames(stagingModel, rules);
+  return names ? [stagingModel, names.model, ...scd2GeneratedModels(stagingModel, rules).map(g => g.name)] : [];
+}
+
 // ---------- the scd2_dimensions entry in vars.yaml ----------
 
 export interface Scd2Dimension {

@@ -7,6 +7,7 @@ import {
   DbtAction,
   GraphScope,
   buildArgs,
+  chainBuildArgs,
   dbtExecutable,
   findProjectRoot,
   flagArgs,
@@ -40,7 +41,8 @@ import { DbtLineage } from './lineage';
 import { RunStatusStore } from './runstatus';
 import { DbtLastRun } from './lastrun';
 import { MIGRATED_KEYS, Scope, plannedMigrations } from './migrate';
-import { EditDeps, addSeedsAsSource, checkConnection, createChangeKeyModel, createStagingModel, newModel, openInDocs, renameModel } from './projectedits';
+import { EditDeps, addSeedsAsSource, checkConnection, createChangeKeyModel, createStagingModel, newModel, openInDocs, renameModel, scd2Rules } from './projectedits';
+import { scd2ChainNames } from './scd2';
 import { DbtCodeActions, QueryDeps, addColumnTests, copyCompiled, newScratchpad, previewSelection, profileColumn, profileYamlColumn, runShow, trackScratchpads } from './query';
 import { loadCatalog } from './hover';
 import { PreviewPanel } from './previewPanel';
@@ -340,6 +342,38 @@ async function runDbt(action: DbtAction, graph: GraphScope, uri?: vscode.Uri, ur
     args,
     cwd: sel.root,
     title: selectors.length ? `${action} ${sel.paths.map(p => withGraph(displayName(p), graph)).join(' ')}` : `${action} (whole project)`,
+    diagnostics,
+    targetDir: targetDirOf(sel.root),
+    folder: workspaceFolderOf(sel.root)
+  });
+}
+
+/**
+ * Build staging models and their SCD2 chains (change key, candidate, history, published, gates), nothing further
+ * down. Several selected in the Explorer: every chain in one dbt build.
+ */
+async function buildScd2Chain(target?: unknown, targets?: vscode.Uri[]): Promise<void> {
+  const uri = asUri(target) ?? vscode.window.activeTextEditor?.document.uri;
+  const sel = await resolveSelection(uri, targets, false);
+  if (!sel) {
+    return;
+  }
+  const staging = sel.paths.map(p => modelName(p));
+  const notStaging = staging.filter(m => !scd2ChainNames(m, scd2Rules()).length);
+  if (notStaging.length) {
+    void vscode.window.showErrorMessage(`dbt Commander: Build SCD2 Chain needs staging models (stg_….sql); ${notStaging.join(', ')} isn't one.`);
+    return;
+  }
+  const names = [...new Set(staging.flatMap(m => scd2ChainNames(m, scd2Rules())))];
+  const exe = await requireExe();
+  if (!exe) {
+    return;
+  }
+  await runDbtTask({
+    exe,
+    args: chainBuildArgs(names, cfg().get<string>('target', ''), cfg().get<string>('extraArgs', '')),
+    cwd: sel.root,
+    title: `build SCD2 chain of ${staging.join(' ')}`,
     diagnostics,
     targetDir: targetDirOf(sel.root),
     folder: workspaceFolderOf(sel.root)
@@ -997,6 +1031,7 @@ export function activate(ctx: vscode.ExtensionContext): DbtRunnerApi {
     statusItem,
     targetItem,
     diagnostics,
+    vscode.commands.registerCommand('dbtCommander.buildScd2Chain', (target?: unknown, targets?: vscode.Uri[]) => buildScd2Chain(target, targets)),
     vscode.commands.registerCommand('dbtCommander.compile', (uri?: vscode.Uri) => compileModel(uri)),
     // From the Explorer / editor menus: a Uri; from the sidebar: a tree item with its resourceUri.
     vscode.commands.registerCommand('dbtCommander.copyCompiled', (arg?: vscode.Uri | { resourceUri?: vscode.Uri }) =>

@@ -8,7 +8,7 @@ import { BRONZE_DEFAULTS, BronzeRules, bronzeStaging } from './bronze';
 import { HASH_COLUMNS_MACRO, SCD2_DEFAULTS, Scd2Rules, addScd2Dimension, changeKeyNames, changeKeySql, scd2Dimension, scd2GeneratedModels } from './scd2';
 
 /** The SCD2 rules from settings (`dbtCommander.scd2.*`), defaults for anything unset. */
-function scd2Rules(): Scd2Rules {
+export function scd2Rules(): Scd2Rules {
   const c = vscode.workspace.getConfiguration('dbtCommander.scd2');
   return {
     historySchema: c.get<string>('historySchema', SCD2_DEFAULTS.historySchema) || SCD2_DEFAULTS.historySchema,
