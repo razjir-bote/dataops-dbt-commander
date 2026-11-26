@@ -4,11 +4,11 @@ import { HASH_COLUMNS_MACRO, SCD2_DEFAULTS, addScd2Dimension, changeKeyNames, ch
 
 test('changeKeyNames from the staging model name', () => {
   assert.deepEqual(changeKeyNames('stg_ace__aus_accounttag', SCD2_DEFAULTS), {
-    model: 'int_ace__aus_accounttag__changekey',
+    model: 'int_ace__aus_accounttag_changekey',
     dim: 'dim_ace__aus_accounttag',
     history: 'dim_ace__aus_accounttag__history'
   });
-  assert.deepEqual(changeKeyNames('stg_a', SCD2_DEFAULTS), { model: 'int_a__changekey', dim: 'dim_a', history: 'dim_a__history' });
+  assert.deepEqual(changeKeyNames('stg_a', SCD2_DEFAULTS), { model: 'int_a_changekey', dim: 'dim_a', history: 'dim_a__history' });
   assert.equal(changeKeyNames('orders', SCD2_DEFAULTS), undefined, 'not a staging model');
 });
 
@@ -135,8 +135,8 @@ const indent = (lines: string[], n: number) => lines.map(l => ' '.repeat(n) + l)
 const dim = (dimName = 'dim_ace__msdynmkt_segment', source = 'int_ace__msdynmkt_segment__changekey') =>
   scd2Dimension(dimName, source, 'entity_id', SCD2_DEFAULTS);
 
-test('changeKeyNames: the change-key model is int_<source>__<entity>__changekey', () => {
-  assert.equal(changeKeyNames('stg_ace__msdynmkt_segment', SCD2_DEFAULTS)!.model, 'int_ace__msdynmkt_segment__changekey');
+test('changeKeyNames: the change-key model is int_<source>__<entity>_changekey (one underscore)', () => {
+  assert.equal(changeKeyNames('stg_ace__msdynmkt_segment', SCD2_DEFAULTS)!.model, 'int_ace__msdynmkt_segment_changekey');
   assert.equal(changeKeyNames('stg_ace__msdynmkt_segment', SCD2_DEFAULTS)!.dim, 'dim_ace__msdynmkt_segment');
 });
 

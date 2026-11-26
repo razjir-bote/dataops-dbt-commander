@@ -272,7 +272,7 @@ async function definesMacro(deps: EditDeps, root: string, name: string): Promise
 }
 
 /**
- * Create `int_<source>__<entity>__changekey.sql` from a staging model (`stg_<source>__<entity>`) in the team's SCD2
+ * Create `int_<source>__<entity>_changekey.sql` from a staging model (`stg_<source>__<entity>`) in the team's SCD2
  * template, plus its YAML entry — and `macros/hash_columns.sql` when the hash needs it and the project lacks it —
  * then the generated SCD2 models, the gates test and the dimension's entry in the vars file's `scd2_dimensions:`.
  */

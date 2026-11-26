@@ -2,7 +2,7 @@
   "name": "dataops-dbt-commander",
   "displayName": "DataOps dbt Commander",
   "description": "Run, build, test, compile and preview dbt models from the VS Code Explorer and editor with dbt-core 1.x from a configured venv.",
-  "version": "0.17.1",
+  "version": "0.17.2",
   "publisher": "local",
   "license": "MIT",
   "engines": {
@@ -1024,7 +1024,7 @@
         "dbtCommander.scd2.changeKeyFolder": {
           "type": "string",
           "default": "models/intermediate/changekey",
-          "description": "SCD2 change-key model: folder for int_<source>__<entity>__changekey.sql (relative to the project)."
+          "description": "SCD2 change-key model: folder for int_<source>__<entity>_changekey.sql (relative to the project)."
         },
         "dbtCommander.scd2.hashColumns": {
           "type": "array",

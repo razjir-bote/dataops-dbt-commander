@@ -168,7 +168,7 @@ In a SQL scratchpad, `Ctrl+Enter` runs the query (or the selection).
 
   Every rule is a `dbtCommander.bronzeStaging.*` setting. The SQL is T-SQL (Synapse / SQL Server).
 - **Create SCD2 Models and Gates Test…** — right-click a `stg_` model:
-  - `int_<source>__<entity>__changekey.sql` — only extracts the history table hasn't loaded yet, with
+  - `int_<source>__<entity>_changekey.sql` — only extracts the history table hasn't loaded yet, with
     `attribute_hash` = `versionnumber`, else `_full_row_hash`, else `{{ hash_columns([...]) }}` over the data columns
     (the `hash_columns` macro is added when needed; it never passes more than 8000 bytes to `HASHBYTES`, however wide
     the table);

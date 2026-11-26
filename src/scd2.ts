@@ -37,12 +37,12 @@ const bracket = (name: string) => `[${name.replace(/]/g, ']]')}]`;
 const lit = (s: string) => `'${s.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
 
 /**
- * `stg_<source>__<entity>` → the change-key model (`int_<source>__<entity>__changekey`), the dimension
+ * `stg_<source>__<entity>` → the change-key model (`int_<source>__<entity>_changekey`), the dimension
  * (`dim_<source>__<entity>`) and its history table; undefined for a non-staging name.
  */
 export function changeKeyNames(stagingModel: string, rules: Scd2Rules): { model: string; dim: string; history: string } | undefined {
   const m = /^stg_(.+)$/i.exec(stagingModel);
-  return m ? { model: `int_${m[1]}__changekey`, dim: `${rules.historyPrefix}${m[1]}`, history: `${rules.historyPrefix}${m[1]}__history` } : undefined;
+  return m ? { model: `int_${m[1]}_changekey`, dim: `${rules.historyPrefix}${m[1]}`, history: `${rules.historyPrefix}${m[1]}__history` } : undefined;
 }
 
 /** The SCD2 files after the change-key model, each a call to one of the project's macros. `test`: a singular test. */
@@ -238,7 +238,7 @@ export function changeKeySql(
   notData: string[] = []
 ): { sql: string; usesMacro: boolean } {
   const skip = new Set([...NOT_DATA, ...notData.map(n => n.toLowerCase())]);
-  const names = changeKeyNames(stagingModel, rules) ?? { model: `int_${stagingModel}__changekey`, dim: `${rules.historyPrefix}${stagingModel}`, history: `${rules.historyPrefix}${stagingModel}__history` };
+  const names = changeKeyNames(stagingModel, rules) ?? { model: `int_${stagingModel}_changekey`, dim: `${rules.historyPrefix}${stagingModel}`, history: `${rules.historyPrefix}${stagingModel}__history` };
   const has = (name: string) => columns.find(c => c.toLowerCase() === name.toLowerCase());
   const direct = rules.hashColumns.map(has).find((c): c is string => !!c);
   const data = columns.filter(c => !c.startsWith('_') && !skip.has(c.toLowerCase()));
